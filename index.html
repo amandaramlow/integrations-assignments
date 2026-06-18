@@ -222,6 +222,16 @@
   </div>
 
   <div class="sidebar-section">
+    <h2>Departed Members</h2>
+    <p style="font-size:11px;color:var(--gray-400);margin-bottom:8px">Cases assigned to these people will be flagged for reassignment.</p>
+    <div id="departed-list"></div>
+    <div class="add-person">
+      <input id="new-departed-input" placeholder="Add departed member…" onkeydown="if(event.key==='Enter')addDeparted()" />
+      <button class="btn-sm" onclick="addDeparted()">+</button>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
     <h2>Salesforce Report</h2>
     <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -296,6 +306,7 @@ const COL = {
   PRODUCT:      "Product Name: Product Name",
   OWNER:        "Case Owner",
   PREF_LANG:    "Preferred Language",
+  LATEST_COMMENT: "Latest Case Comments",
 };
 const DEFAULT_TEAM = [
   { name:"Amber McWherter",  ooo:false, reserve:false, bilingual:false },
@@ -325,6 +336,7 @@ function productClass(prod) {
 // STATE
 // ─────────────────────────────────────────────
 let team = loadTeam();
+let departed = loadDeparted();
 let reportRows = null;
 let lastAssignments = [], lastWorkload = [], lastOooCases = [];
 let filteredRows = [];
@@ -338,6 +350,28 @@ function loadTeam() {
   return JSON.parse(JSON.stringify(DEFAULT_TEAM));
 }
 function saveTeam() { localStorage.setItem("intg_team_v3", JSON.stringify(team)); }
+
+function loadDeparted() {
+  try { const s = localStorage.getItem("intg_departed_v1"); if (s) return JSON.parse(s); } catch(e){}
+  return ["Isabel Macias"];
+}
+function saveDeparted() { localStorage.setItem("intg_departed_v1", JSON.stringify(departed)); }
+
+function renderDeparted() {
+  const list = document.getElementById("departed-list"); if (!list) return;
+  list.innerHTML = departed.map((name, i) => `
+    <div style="display:flex;align-items:center;gap:6px;padding:5px 0;border-bottom:1px solid var(--gray-100);">
+      <span style="flex:1;font-size:12px;font-weight:600;color:var(--red)">${name}</span>
+      <button onclick="removeDeparted(${i})" style="border:none;background:none;cursor:pointer;color:var(--gray-400);font-size:14px;line-height:1">×</button>
+    </div>`).join("") || `<p style="font-size:11px;color:var(--gray-400)">None added.</p>`;
+}
+function addDeparted() {
+  const inp = document.getElementById("new-departed-input");
+  const name = inp.value.trim(); if (!name) return;
+  if (departed.includes(name)) { alert("Already listed."); return; }
+  departed.push(name); saveDeparted(); renderDeparted(); inp.value = "";
+}
+function removeDeparted(i) { departed.splice(i, 1); saveDeparted(); renderDeparted(); }
 
 // ─────────────────────────────────────────────
 // TEAM UI
@@ -501,8 +535,10 @@ function runAssignments() {
     const hasInstall   = inst && inst !== "nan" && inst !== "None" && inst !== "";
 
     if (!isUnassigned) {
-      const matched = matchOwner(r[COL.OWNER], oooMembers);
-      if (matched) { oooCases.push({...r, _oooOwner: matched}); return; }
+      const matchedOoo = matchOwner(r[COL.OWNER], oooMembers);
+      if (matchedOoo) { oooCases.push({...r, _oooOwner: matchedOoo, _flagReason: "OOO"}); return; }
+      const matchedDep = matchOwner(r[COL.OWNER], departed);
+      if (matchedDep) { oooCases.push({...r, _oooOwner: matchedDep, _flagReason: "Departed"}); return; }
       alreadyDone.push(r);
     } else if (hasInstall) {
       toAssign.push(r);
@@ -565,6 +601,7 @@ function runAssignments() {
       "Install Date":          date,
       "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
       "Installer":             inst,
+      "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
       "Last Processing Date":  today,
       "_overdue":              overdue,
     });
@@ -657,6 +694,7 @@ function renderAll() {
         <th onclick="sortBy('Install Date')">Install Date</th>
         <th onclick="sortBy('Installer')">Installer</th>
         <th onclick="sortBy('Preferred Language')">Language</th>
+        <th>Latest Update</th>
       </tr></thead>
       <tbody id="assign-tbody"></tbody></table>
       <div class="pagination">
@@ -678,21 +716,27 @@ function renderAll() {
 function renderOooWarning() {
   const grouped = {};
   lastOooCases.forEach(r => {
-    const o = r._oooOwner; grouped[o] = grouped[o]||[];
-    grouped[o].push(r[COL.CASE_NUM]);
+    const key = r._oooOwner + "|||" + (r._flagReason||"OOO");
+    grouped[key] = grouped[key] || { name: r._oooOwner, reason: r._flagReason||"OOO", cases: [] };
+    grouped[key].cases.push(r[COL.CASE_NUM]);
   });
-  const ownerBlocks = Object.entries(grouped).map(([name, cases]) =>
-    `<div style="margin-bottom:6px"><strong>${name}</strong> (${cases.length} case${cases.length>1?"s":""}):<br>
-     <div class="warning-case-list" style="margin-top:4px">
-       ${cases.map(c=>`<span class="warning-case">${c}</span>`).join("")}
-     </div></div>`
+  const ownerBlocks = Object.values(grouped).map(g =>
+    `<div style="margin-bottom:8px">
+       <strong>${g.name}</strong>
+       <span class="mbadge ${g.reason==='Departed'?'mbadge-ooo':'mbadge-ooo'}" style="margin-left:4px;${g.reason==='Departed'?'background:#f3e8ff;color:#7B3FA0':''}">${g.reason}</span>
+       (${g.cases.length} case${g.cases.length>1?"s":""}):
+       <div class="warning-case-list" style="margin-top:4px">
+         ${g.cases.map(c=>`<span class="warning-case">${c}</span>`).join("")}
+       </div>
+     </div>`
   ).join("");
+  const total = lastOooCases.length;
   return `
     <div class="warning-banner">
-      <h3>⚠ ${lastOooCases.length} case${lastOooCases.length>1?"s":""} assigned to OOO team member${Object.keys(grouped).length>1?"s":""}</h3>
+      <h3>⚠ ${total} case${total>1?"s":""} need reassignment</h3>
       <div style="margin-bottom:10px">${ownerBlocks}</div>
-      <p style="margin-bottom:8px">These cases need to be reassigned. Click below to auto-assign them to available specialists, then export and update in Salesforce.</p>
-      <button class="btn-reassign" onclick="autoReassignOoo()">⟳ Auto-Reassign OOO Cases</button>
+      <p style="margin-bottom:8px">Click below to auto-assign these to available specialists, then export and update in Salesforce.</p>
+      <button class="btn-reassign" onclick="autoReassignOoo()">⟳ Auto-Reassign These Cases</button>
     </div>`;
 }
 
@@ -755,6 +799,7 @@ function autoReassignOoo() {
       "Install Date":          String(r[COL.INSTALL_DATE]||"").trim(),
       "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
       "Installer":             String(r[COL.INSTALLER]||"").trim(),
+      "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
       "Last Processing Date":  today,
       "_overdue":              isOverdue(String(r[COL.INSTALL_DATE]||"")),
       "_reassigned":           true,
@@ -835,7 +880,7 @@ function renderTable() {
 
   const page = filteredRows.slice(start, start+PAGE_SIZE);
   if (!page.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="no-data">No cases match the current filters.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="no-data">No cases match the current filters.</td></tr>`;
   } else {
     tbody.innerHTML = page.map(r => rowHtml(r)).join("");
   }
@@ -860,6 +905,9 @@ function rowHtml(r) {
     <td>${r["Install Date"]}${overdueBadge}</td>
     <td style="color:var(--gray-400);font-size:11px">${r["Installer"]||""}</td>
     <td>${langPill}</td>
+    <td style="max-width:220px;font-size:11px;color:var(--gray-700);">
+      ${r["Latest Comment"] ? `<span title="${r["Latest Comment"].replace(/"/g,'&quot;')}">${r["Latest Comment"].length > 80 ? r["Latest Comment"].slice(0,80)+"…" : r["Latest Comment"]}</span>` : ""}
+    </td>
   </tr>`;
 }
 
@@ -874,7 +922,7 @@ function renderInstallerView(tbody, rows) {
   const sortedKeys = Object.keys(groups).sort();
   tbody.innerHTML = sortedKeys.map(key => {
     const g = groups[key];
-    const hdr = `<tr class="installer-group-hdr"><td colspan="7">📅 ${g.installer} &mdash; ${g.date} <span style="font-weight:400;color:var(--gray-400)">(${g.rows.length} case${g.rows.length>1?"s":""})</span></td></tr>`;
+    const hdr = `<tr class="installer-group-hdr"><td colspan="8">📅 ${g.installer} &mdash; ${g.date} <span style="font-weight:400;color:var(--gray-400)">(${g.rows.length} case${g.rows.length>1?"s":""})</span></td></tr>`;
     return hdr + g.rows.map(r => rowHtml(r)).join("");
   }).join("") || `<tr><td colspan="7" class="no-data">No cases match the current filters.</td></tr>`;
 }
@@ -891,7 +939,7 @@ function changePage(dir) {
 function exportCSV(filteredOnly) {
   const rows = filteredOnly ? filteredRows : lastAssignments;
   if (!rows.length) return;
-  const cols = ["Assigned To","Case Number","Integration / Product","Account Name","Install Date","Preferred Language","Installer","Last Processing Date"];
+  const cols = ["Assigned To","Case Number","Integration / Product","Account Name","Install Date","Preferred Language","Installer","Latest Comment","Last Processing Date"];
   const data = [cols, ...rows.map(r => cols.map(c => r[c]||""))];
   const csv  = data.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], {type:"text/csv"});
@@ -904,6 +952,7 @@ function exportCSV(filteredOnly) {
 // INIT
 // ─────────────────────────────────────────────
 renderTeam();
+renderDeparted();
 </script>
 </body>
 </html>
