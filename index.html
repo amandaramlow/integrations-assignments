@@ -274,7 +274,8 @@
       <div class="stat-card"><div class="lbl">New Assigned</div><div class="val" id="s-total">0</div><div class="sub">this run</div></div>
       <div class="stat-card"><div class="lbl">Accounts</div><div class="val" id="s-accounts">0</div><div class="sub">unique</div></div>
       <div class="stat-card"><div class="lbl">Spanish</div><div class="val" id="s-spanish">0</div><div class="sub">bilingual routed</div></div>
-      <div class="stat-card warn"><div class="lbl">Overdue</div><div class="val" id="s-overdue">0</div><div class="sub">past install date</div></div>
+      <div class="stat-card warn"><div class="lbl">Overdue (New)</div><div class="val" id="s-overdue">0</div><div class="sub">past install date</div></div>
+      <div class="stat-card warn"><div class="lbl">Overdue (Assigned)</div><div class="val" id="s-overdue-assigned">0</div><div class="sub">already in Salesforce</div></div>
       <div class="stat-card warn"><div class="lbl">OOO Cases</div><div class="val" id="s-ooo">0</div><div class="sub">need reassignment</div></div>
     </div>
   </div>
@@ -613,16 +614,38 @@ function runAssignments() {
     total: (existingCounts[p.name]||0)+(newCounts[p.name]||0),
   }));
 
-  lastAssignments = assignments;
+  // Collect already-assigned overdue cases (visible but not newly assigned)
+  const overdueAssigned = [];
+  alreadyDone.forEach(r => {
+    const date = String(r[COL.INSTALL_DATE]||"").trim();
+    if (!isOverdue(date)) return;
+    const ownerRaw = String(r[COL.OWNER]||"").trim();
+    overdueAssigned.push({
+      "Assigned To":           ownerRaw,
+      "Case Number":           String(r[COL.CASE_NUM]||"").trim(),
+      "Integration / Product": String(r[COL.PRODUCT]||"").trim(),
+      "Account Name":          String(r[COL.ACCOUNT]||"").trim(),
+      "Install Date":          date,
+      "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
+      "Installer":             String(r[COL.INSTALLER]||"").trim(),
+      "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
+      "Last Processing Date":  today,
+      "_overdue":              true,
+      "_alreadyAssigned":      true,
+    });
+  });
+
+  lastAssignments = [...assignments, ...overdueAssigned];
   lastWorkload    = workload;
   lastOooCases    = oooCases;
 
   // Stats
-  const overdueCount = assignments.filter(a => a._overdue).length;
+  const overdueCount = lastAssignments.filter(a => a._overdue).length;
   document.getElementById("stat-grid").style.display = "";
   document.getElementById("s-total").textContent     = assignments.length;
   document.getElementById("s-accounts").textContent  = new Set(assignments.map(a=>a["Account Name"])).size;
   document.getElementById("s-spanish").textContent   = assignments.filter(a=>["spanish","español","es"].includes(a["Preferred Language"].toLowerCase())).length;
+  document.getElementById("s-overdue-assigned").textContent = overdueAssigned.length;
   document.getElementById("s-overdue").textContent   = overdueCount;
   document.getElementById("s-ooo").textContent       = oooCases.length;
   document.getElementById("run-date").textContent    = `Run ${new Date().toLocaleString()}`;
@@ -646,7 +669,7 @@ function renderAll() {
     ${overdueCount > 0 ? `
     <div class="overdue-banner">
       <h3>⚠ ${overdueCount} case${overdueCount>1?"s":""} with a past install date</h3>
-      <p>These cases have already passed their scheduled install date. Review and follow up with the installer as needed.</p>
+      <p>Includes newly assigned and already-assigned cases. Filter by <strong>Overdue only</strong> to review. Cases labeled <strong>In Salesforce</strong> are already assigned and may need follow-up.</p>
     </div>` : ""}
 
     <div class="sec-title" style="margin-bottom:10px">Workload</div>
@@ -895,10 +918,14 @@ function rowHtml(r) {
   const isSpan   = ["spanish","español","es"].includes(lang.toLowerCase());
   const langPill = isSpan ? `<span class="pill pill-green">Spanish</span>` : (lang ? `<span class="pill pill-gray">${lang}</span>` : "");
   const prodCls  = productClass(r["Integration / Product"]);
-  const overdueBadge = r._overdue ? `<span class="pill pill-red" style="margin-left:4px">Overdue</span>` : "";
-  const reasgnBadge  = r._reassigned ? `<span class="pill" style="background:var(--purple-light);color:var(--purple);margin-left:4px">Reassigned</span>` : "";
+  const overdueBadge    = r._overdue ? `<span class="pill pill-red" style="margin-left:4px">Overdue</span>` : "";
+  const reasgnBadge     = r._reassigned ? `<span class="pill" style="background:var(--purple-light);color:var(--purple);margin-left:4px">Reassigned</span>` : "";
+  const alreadyBadge    = r._alreadyAssigned ? `<span class="pill pill-gray" style="margin-left:4px">In Salesforce</span>` : "";
+  const assignedPill    = r._alreadyAssigned
+    ? `<span class="pill pill-gray">${r["Assigned To"]}</span>`
+    : `<span class="pill pill-blue">${r["Assigned To"]}</span>`;
   return `<tr class="${r._overdue?'overdue-row':''}">
-    <td><span class="pill pill-blue">${r["Assigned To"]}</span>${reasgnBadge}</td>
+    <td>${assignedPill}${reasgnBadge}${alreadyBadge}</td>
     <td>${r["Case Number"]}</td>
     <td><span class="pill ${prodCls}">${r["Integration / Product"]}</span></td>
     <td>${r["Account Name"]}</td>
