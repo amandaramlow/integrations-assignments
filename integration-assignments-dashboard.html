@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Integration Case Assignments</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --brand: #0057FF;
+    --brand-light: #EEF3FF;
+    --green: #00A878;
+    --green-light: #E6F7F3;
+    --orange: #FF6B35;
+    --orange-light: #FFF1EB;
+    --red: #E63946;
+    --red-light: #FDEAEA;
+    --gray-50: #F8F9FB;
+    --gray-100: #EEF0F4;
+    --gray-200: #D9DCE3;
+    --gray-400: #9198A6;
+    --gray-700: #3D4554;
+    --gray-900: #141824;
+    --radius: 10px;
+    --shadow: 0 2px 8px rgba(0,0,0,.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--gray-50); color: var(--gray-900); font-size: 14px; }
+
+  /* ── Layout ── */
+  .app { display: flex; height: 100vh; overflow: hidden; }
+  .sidebar { width: 300px; min-width: 300px; background: #fff; border-right: 1px solid var(--gray-200); display: flex; flex-direction: column; overflow-y: auto; }
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .main-header { padding: 20px 24px 0; flex-shrink: 0; }
+  .main-body { flex: 1; overflow-y: auto; padding: 16px 24px 32px; }
+
+  /* ── Sidebar ── */
+  .sidebar-header { padding: 20px 16px 12px; border-bottom: 1px solid var(--gray-100); }
+  .sidebar-header h1 { font-size: 15px; font-weight: 700; color: var(--gray-900); }
+  .sidebar-header p { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
+
+  .sidebar-section { padding: 14px 16px; border-bottom: 1px solid var(--gray-100); }
+  .sidebar-section h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .7px; color: var(--gray-400); margin-bottom: 10px; }
+
+  /* ── Team rows ── */
+  .team-row { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--gray-100); }
+  .team-row:last-child { border-bottom: none; }
+  .team-name { flex: 1; font-size: 13px; font-weight: 500; }
+  .team-row.ooo .team-name { color: var(--gray-400); text-decoration: line-through; }
+  .badges { display: flex; gap: 4px; flex-shrink: 0; }
+  .badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 20px; }
+  .badge-ooo { background: var(--red-light); color: var(--red); }
+  .badge-reserve { background: var(--orange-light); color: var(--orange); }
+  .badge-bilingual { background: var(--green-light); color: var(--green); }
+
+  /* Toggle switches */
+  .toggle-group { display: flex; gap: 6px; }
+  .toggle-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .toggle-item label { font-size: 9px; color: var(--gray-400); font-weight: 600; text-transform: uppercase; }
+  .toggle { position: relative; width: 28px; height: 16px; cursor: pointer; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle .knob { position: absolute; inset: 0; background: var(--gray-200); border-radius: 16px; transition: background .2s; }
+  .toggle .knob:before { content: ""; position: absolute; width: 12px; height: 12px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  .toggle input:checked + .knob { background: var(--brand); }
+  .toggle input:checked + .knob:before { transform: translateX(12px); }
+  .toggle.t-ooo input:checked + .knob { background: var(--red); }
+  .toggle.t-reserve input:checked + .knob { background: var(--orange); }
+  .toggle.t-bilingual input:checked + .knob { background: var(--green); }
+
+  /* Add person */
+  .add-person { margin-top: 8px; display: flex; gap: 6px; }
+  .add-person input { flex: 1; border: 1px solid var(--gray-200); border-radius: 6px; padding: 5px 8px; font-size: 12px; }
+  .add-person input:focus { outline: 2px solid var(--brand); border-color: transparent; }
+  .btn-sm { background: var(--brand); color: #fff; border: none; border-radius: 6px; padding: 5px 10px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .btn-sm:hover { opacity: .9; }
+
+  /* ── Upload zone ── */
+  .upload-zone { border: 2px dashed var(--gray-200); border-radius: var(--radius); padding: 28px 20px; text-align: center; cursor: pointer; transition: border-color .2s, background .2s; background: #fff; }
+  .upload-zone:hover, .upload-zone.drag-over { border-color: var(--brand); background: var(--brand-light); }
+  .upload-zone svg { margin-bottom: 8px; color: var(--brand); }
+  .upload-zone p { font-size: 13px; color: var(--gray-700); font-weight: 500; }
+  .upload-zone small { color: var(--gray-400); font-size: 11px; }
+  #file-input { display: none; }
+  .file-loaded { background: var(--brand-light); border-color: var(--brand); }
+  .file-loaded p { color: var(--brand); }
+
+  /* ── Run button ── */
+  .btn-run { width: 100%; background: var(--brand); color: #fff; border: none; border-radius: var(--radius); padding: 12px; font-size: 14px; font-weight: 700; cursor: pointer; transition: opacity .2s; margin-top: 12px; }
+  .btn-run:hover:not(:disabled) { opacity: .88; }
+  .btn-run:disabled { opacity: .45; cursor: default; }
+
+  /* ── Page header ── */
+  .page-title { font-size: 22px; font-weight: 800; color: var(--gray-900); }
+  .page-subtitle { font-size: 13px; color: var(--gray-400); margin-top: 2px; }
+  .header-row { display: flex; align-items: flex-end; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+
+  /* ── Stat cards ── */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+  .stat-card { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 14px 16px; }
+  .stat-card .label { font-size: 11px; color: var(--gray-400); font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+  .stat-card .value { font-size: 28px; font-weight: 800; color: var(--gray-900); line-height: 1.1; margin-top: 4px; }
+  .stat-card .sub { font-size: 11px; color: var(--gray-400); margin-top: 2px; }
+
+  /* ── Workload bars ── */
+  .workload-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-bottom: 16px; }
+  .wl-card { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 12px 14px; }
+  .wl-name { font-size: 13px; font-weight: 700; margin-bottom: 2px; display: flex; align-items: center; gap: 5px; }
+  .wl-meta { font-size: 11px; color: var(--gray-400); margin-bottom: 8px; }
+  .wl-bar-bg { background: var(--gray-100); border-radius: 4px; height: 6px; overflow: hidden; }
+  .wl-bar-fill { height: 100%; border-radius: 4px; background: var(--brand); transition: width .5s; }
+  .wl-bar-fill.reserve { background: var(--orange); }
+  .wl-counts { display: flex; justify-content: space-between; font-size: 11px; color: var(--gray-400); margin-top: 4px; }
+  .wl-counts strong { color: var(--gray-900); }
+
+  /* ── Section title ── */
+  .section-title { font-size: 13px; font-weight: 700; color: var(--gray-700); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .section-title span.count { background: var(--brand-light); color: var(--brand); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+
+  /* ── Filters bar ── */
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .filters input, .filters select { border: 1px solid var(--gray-200); border-radius: 6px; padding: 6px 10px; font-size: 12px; background: #fff; }
+  .filters input:focus, .filters select:focus { outline: 2px solid var(--brand); border-color: transparent; }
+  .filters input { width: 220px; }
+
+  /* ── Table ── */
+  .table-wrap { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { background: var(--gray-50); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--gray-400); padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--gray-200); white-space: nowrap; cursor: pointer; user-select: none; }
+  thead th:hover { background: var(--gray-100); }
+  thead th.sorted { color: var(--brand); }
+  tbody tr { border-bottom: 1px solid var(--gray-100); transition: background .1s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--gray-50); }
+  tbody td { padding: 9px 12px; font-size: 13px; }
+  .pill { display: inline-block; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .pill-blue { background: var(--brand-light); color: var(--brand); }
+  .pill-green { background: var(--green-light); color: var(--green); }
+  .pill-orange { background: var(--orange-light); color: var(--orange); }
+  .pill-gray { background: var(--gray-100); color: var(--gray-400); }
+  .no-data { text-align: center; color: var(--gray-400); padding: 40px 0; font-size: 13px; }
+
+  /* ── Export ── */
+  .btn-export { background: var(--green); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  .btn-export:hover { opacity: .9; }
+
+  /* ── Empty state ── */
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--gray-400); }
+  .empty-state h3 { font-size: 16px; color: var(--gray-700); margin-bottom: 6px; }
+  .empty-state p { font-size: 13px; }
+
+  /* ── Pagination ── */
+  .pagination { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-top: 1px solid var(--gray-100); font-size: 12px; color: var(--gray-400); }
+  .pagination-btns button { border: 1px solid var(--gray-200); background: #fff; border-radius: 5px; padding: 4px 10px; cursor: pointer; font-size: 12px; margin-left: 4px; }
+  .pagination-btns button:disabled { opacity: .4; cursor: default; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 3px; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ══════════ SIDEBAR ══════════ -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>Integration Assignments</h1>
+      <p>SpotOn · Integrations Team</p>
+    </div>
+
+    <!-- Team Settings -->
+    <div class="sidebar-section">
+      <h2>Team Settings</h2>
+      <div id="team-list"></div>
+      <div class="add-person" style="margin-top:10px;">
+        <input id="new-name-input" placeholder="Add team member…" />
+        <button class="btn-sm" onclick="addPerson()">+</button>
+      </div>
+    </div>
+
+    <!-- Upload -->
+    <div class="sidebar-section">
+      <h2>Salesforce Report</h2>
+      <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <p id="upload-label">Upload report (.xlsx)</p>
+        <small>Integration Assignments (Claude)</small>
+      </div>
+      <input type="file" id="file-input" accept=".xlsx,.xls" onchange="handleFile(this)" />
+      <button class="btn-run" id="run-btn" disabled onclick="runAssignments()">Run Assignments</button>
+    </div>
+
+    <!-- Legend -->
+    <div class="sidebar-section" style="font-size:11px; color:var(--gray-400); line-height:1.7;">
+      <h2>Legend</h2>
+      <div><span class="badge badge-ooo">OOO</span> Excluded from run</div>
+      <div style="margin-top:4px"><span class="badge badge-reserve">Reserve</span> ~50% fewer cases</div>
+      <div style="margin-top:4px"><span class="badge badge-bilingual">Bilingual</span> Takes Spanish cases</div>
+    </div>
+  </aside>
+
+  <!-- ══════════ MAIN ══════════ -->
+  <div class="main">
+    <div class="main-header">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Case Assignments</div>
+          <div class="page-subtitle" id="run-date">Upload a report and click Run Assignments</div>
+        </div>
+        <button class="btn-export" onclick="exportCSV()" id="export-btn" style="display:none">⬇ Export CSV</button>
+      </div>
+
+      <!-- Stat cards -->
+      <div class="stat-grid" id="stat-grid" style="display:none">
+        <div class="stat-card"><div class="label">Total Assigned</div><div class="value" id="s-total">0</div><div class="sub">new cases</div></div>
+        <div class="stat-card"><div class="label">Accounts</div><div class="value" id="s-accounts">0</div><div class="sub">unique</div></div>
+        <div class="stat-card"><div class="label">Spanish Cases</div><div class="value" id="s-spanish">0</div><div class="sub">bilingual routed</div></div>
+        <div class="stat-card"><div class="label">Active Specialists</div><div class="value" id="s-specialists">0</div><div class="sub">in this run</div></div>
+      </div>
+    </div>
+
+    <div class="main-body" id="main-body">
+      <div class="empty-state">
+        <h3>No data yet</h3>
+        <p>Configure your team, upload the Salesforce report, and click Run Assignments.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────
+const UNASSIGNED_OWNERS = new Set([
+  "default case queue (no assignment)",
+  "integrations activations",
+  "integrations activations queue",
+  ""
+]);
+
+const DEFAULT_TEAM = [
+  { name: "Amber McWherter",  ooo: false, reserve: false, bilingual: false },
+  { name: "Anna Machuca",     ooo: false, reserve: false, bilingual: false },
+  { name: "Gisela Villa",     ooo: false, reserve: false, bilingual: false },
+  { name: "Raul Juarez",      ooo: false, reserve: false, bilingual: false },
+  { name: "Jonathan Cedillo", ooo: false, reserve: false, bilingual: false },
+  { name: "Diana Aguilar",    ooo: false, reserve: false, bilingual: false },
+  { name: "Andres Aguilar",   ooo: false, reserve: false, bilingual: false },
+  { name: "Cristhian Anaya",  ooo: false, reserve: false, bilingual: false },
+  { name: "Enrique Mendoza",  ooo: false, reserve: false, bilingual: false },
+  { name: "Uriel Hernandez",  ooo: false, reserve: false, bilingual: false },
+];
+
+const COL = {
+  CASE_NUM:      "Case Number",
+  INSTALL_DATE:  "Case : Parent Case : Install Date",
+  INSTALLER:     "Case : Parent Case : Install Resource",
+  ACCOUNT:       "Account Name",
+  PRODUCT:       "Product Name: Product Name",
+  OWNER:         "Case Owner",
+  PREF_LANG:     "Preferred Language",
+  LAST_PROC:     "Case : Account Name : Last Processing Date",
+};
+
+// ─────────────────────────────────────────────
+// TEAM STATE (persisted in localStorage)
+// ─────────────────────────────────────────────
+function loadTeam() {
+  try {
+    const saved = localStorage.getItem("intg_team_v2");
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return JSON.parse(JSON.stringify(DEFAULT_TEAM));
+}
+function saveTeam() {
+  localStorage.setItem("intg_team_v2", JSON.stringify(team));
+}
+
+let team = loadTeam();
+let reportRows = null;
+let lastAssignments = null;
+let lastWorkload = null;
+let filteredRows = [];
+let sortCol = null, sortAsc = true;
+let currentPage = 1;
+const PAGE_SIZE = 50;
+let filterText = "", filterOwner = "all", filterProduct = "all", filterLang = "all";
+
+// ─────────────────────────────────────────────
+// RENDER TEAM
+// ─────────────────────────────────────────────
+function renderTeam() {
+  const list = document.getElementById("team-list");
+  list.innerHTML = "";
+  team.forEach((p, i) => {
+    const row = document.createElement("div");
+    row.className = "team-row" + (p.ooo ? " ooo" : "");
+    row.innerHTML = `
+      <div class="team-name">${p.name}</div>
+      <div class="badges">
+        ${p.ooo ? '<span class="badge badge-ooo">OOO</span>' : ''}
+        ${p.reserve ? '<span class="badge badge-reserve">Res</span>' : ''}
+        ${p.bilingual ? '<span class="badge badge-bilingual">Bil</span>' : ''}
+      </div>
+      <div class="toggle-group">
+        <div class="toggle-item">
+          <label>OOO</label>
+          <label class="toggle t-ooo">
+            <input type="checkbox" ${p.ooo ? "checked" : ""} onchange="toggleFlag(${i},'ooo',this.checked)" />
+            <span class="knob"></span>
+          </label>
+        </div>
+        <div class="toggle-item">
+          <label>Res</label>
+          <label class="toggle t-reserve">
+            <input type="checkbox" ${p.reserve ? "checked" : ""} onchange="toggleFlag(${i},'reserve',this.checked)" />
+            <span class="knob"></span>
+          </label>
+        </div>
+        <div class="toggle-item">
+          <label>Bil</label>
+          <label class="toggle t-bilingual">
+            <input type="checkbox" ${p.bilingual ? "checked" : ""} onchange="toggleFlag(${i},'bilingual',this.checked)" />
+            <span class="knob"></span>
+          </label>
+        </div>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+function toggleFlag(idx, flag, val) {
+  team[idx][flag] = val;
+  saveTeam();
+  renderTeam();
+}
+
+function addPerson() {
+  const input = document.getElementById("new-name-input");
+  const name = input.value.trim();
+  if (!name) return;
+  if (team.some(p => p.name.toLowerCase() === name.toLowerCase())) { alert("Already on the team."); return; }
+  team.push({ name, ooo: false, reserve: false, bilingual: false });
+  saveTeam();
+  renderTeam();
+  input.value = "";
+}
+
+// ─────────────────────────────────────────────
+// FILE HANDLING
+// ─────────────────────────────────────────────
+function handleFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      reportRows = parseReport(e.target.result);
+      const zone = document.getElementById("upload-zone");
+      zone.classList.add("file-loaded");
+      document.getElementById("upload-label").textContent = `✓ ${file.name}`;
+      document.getElementById("run-btn").disabled = false;
+    } catch(err) {
+      alert("Could not parse file: " + err.message);
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+// Drag and drop
+const zone = document.getElementById("upload-zone");
+zone.addEventListener("dragover", e => { e.preventDefault(); zone.classList.add("drag-over"); });
+zone.addEventListener("dragleave", () => zone.classList.remove("drag-over"));
+zone.addEventListener("drop", e => {
+  e.preventDefault();
+  zone.classList.remove("drag-over");
+  const file = e.dataTransfer.files[0];
+  if (file) {
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    document.getElementById("file-input").files = dt.files;
+    handleFile({ files: [file] });
+  }
+});
+
+// ─────────────────────────────────────────────
+// PARSE REPORT
+// ─────────────────────────────────────────────
+function cleanCol(name) {
+  if (!name) return "";
+  return String(name).replace(/\s*↑/g, "").trim();
+}
+
+function parseReport(buffer) {
+  const wb = XLSX.read(new Uint8Array(buffer), { type: "array", cellDates: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+
+  // Find header row
+  let headerIdx = -1;
+  let headers = [];
+  for (let i = 0; i < raw.length; i++) {
+    const row = raw[i];
+    const nonNull = row.filter(v => v !== null && v !== "");
+    if (nonNull.length >= 5 && row.some(v => String(v||"").includes("Case Number") || String(v||"").includes("Account Name"))) {
+      headerIdx = i;
+      headers = row.map(cleanCol);
+      break;
+    }
+  }
+  if (headerIdx === -1) throw new Error("Could not find header row. Check that this is the Integration Assignments (Claude) report.");
+
+  const rows = [];
+  for (let i = headerIdx + 1; i < raw.length; i++) {
+    const obj = {};
+    raw[i].forEach((v, j) => { obj[headers[j]] = v === null ? "" : String(v).trim(); });
+    rows.push(obj);
+  }
+
+  // Forward-fill Account Name
+  let lastAccount = "";
+  rows.forEach(r => {
+    const acct = r[COL.ACCOUNT] || "";
+    if (acct && acct !== "None" && acct.toLowerCase() !== "nan") {
+      lastAccount = acct;
+    } else {
+      r[COL.ACCOUNT] = lastAccount;
+    }
+  });
+
+  // Filter: keep real case numbers (5+ digit strings)
+  const realRows = rows.filter(r => {
+    const cn = String(r[COL.CASE_NUM] || "").trim();
+    if (!/^\d{5,}/.test(cn)) return false;
+    const prod = String(r[COL.PRODUCT] || "").toLowerCase().trim();
+    if (["subtotal", "nan", "none", ""].includes(prod)) return false;
+    return true;
+  });
+
+  return realRows;
+}
+
+// ─────────────────────────────────────────────
+// ASSIGNMENT ENGINE
+// ─────────────────────────────────────────────
+function runAssignments() {
+  if (!reportRows) return;
+
+  const today = new Date().toLocaleDateString("en-US");
+  const active = team.filter(p => !p.ooo);
+
+  if (!active.length) { alert("No active specialists — everyone is marked OOO."); return; }
+
+  const specialistNames = active.map(p => p.name);
+  const bilingualSet    = new Set(active.filter(p => p.bilingual).map(p => p.name));
+  const weightMap       = {};
+  active.forEach(p => { weightMap[p.name] = p.reserve ? 0.5 : 1.0; });
+
+  // Split report
+  const toAssign = [], alreadyDone = [];
+  reportRows.forEach(r => {
+    const owner = String(r[COL.OWNER] || "").trim().toLowerCase();
+    const inst  = String(r[COL.INSTALL_DATE] || "").trim();
+    const isUnassigned = UNASSIGNED_OWNERS.has(owner) || !owner;
+    const hasInstall   = inst && inst !== "nan" && inst !== "None" && inst !== "";
+    if (isUnassigned && hasInstall) toAssign.push(r);
+    else if (!isUnassigned) alreadyDone.push(r);
+  });
+
+  // Count existing workload
+  const existingCounts = {};
+  specialistNames.forEach(n => existingCounts[n] = 0);
+  alreadyDone.forEach(r => {
+    const matched = matchOwner(String(r[COL.OWNER]||""), specialistNames);
+    if (matched) existingCounts[matched]++;
+  });
+
+  const newCounts = {};
+  specialistNames.forEach(n => newCounts[n] = 0);
+
+  const effectiveLoad = name => {
+    const w = weightMap[name] || 1.0;
+    return ((existingCounts[name]||0) + (newCounts[name]||0)) / w;
+  };
+
+  const pickSpecialist = (bilingualOnly) => {
+    let candidates = [...specialistNames];
+    if (bilingualOnly && bilingualSet.size > 0) {
+      const bil = candidates.filter(n => bilingualSet.has(n));
+      if (bil.length) candidates = bil;
+    }
+    return candidates.reduce((a, b) => effectiveLoad(a) <= effectiveLoad(b) ? a : b);
+  };
+
+  // Seed from already-assigned
+  const accountToSpec = {}, instdayToSpec = {};
+  alreadyDone.forEach(r => {
+    const acct = String(r[COL.ACCOUNT]||"").trim();
+    const inst = String(r[COL.INSTALLER]||"").trim();
+    const date = String(r[COL.INSTALL_DATE]||"").trim();
+    const matched = matchOwner(String(r[COL.OWNER]||""), specialistNames);
+    if (!matched) return;
+    if (acct && acct !== "nan") accountToSpec[acct] = accountToSpec[acct] || matched;
+    if (inst && inst !== "nan" && date && date !== "nan") {
+      const key = inst + "|" + date;
+      instdayToSpec[key] = instdayToSpec[key] || matched;
+    }
+  });
+
+  // Assign
+  const assignments = [];
+  toAssign.forEach(r => {
+    const account  = String(r[COL.ACCOUNT]||"").trim();
+    const inst     = String(r[COL.INSTALLER]||"").trim();
+    const date     = String(r[COL.INSTALL_DATE]||"").trim();
+    const lang     = String(r[COL.PREF_LANG]||"").trim().toLowerCase();
+    const needsBil = ["spanish","español","es"].includes(lang);
+
+    let assigned = accountToSpec[account] || null;
+
+    if (!assigned && inst && inst !== "nan") {
+      assigned = instdayToSpec[inst + "|" + date] || null;
+    }
+
+    // Validate still active
+    if (assigned && !specialistNames.includes(assigned)) assigned = null;
+    // Spanish override
+    if (assigned && needsBil && !bilingualSet.has(assigned)) assigned = null;
+
+    if (!assigned) assigned = pickSpecialist(needsBil);
+
+    newCounts[assigned]++;
+    if (account && account !== "nan") accountToSpec[account] = accountToSpec[account] || assigned;
+    if (inst && inst !== "nan") {
+      const key = inst + "|" + date;
+      instdayToSpec[key] = instdayToSpec[key] || assigned;
+    }
+
+    assignments.push({
+      "Assigned To":           assigned,
+      "Case Number":           String(r[COL.CASE_NUM]||"").trim(),
+      "Integration / Product": String(r[COL.PRODUCT]||"").trim(),
+      "Account Name":          account,
+      "Install Date":          date,
+      "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
+      "Installer":             inst,
+      "Last Processing Date":  today,
+    });
+  });
+
+  // Workload
+  const workload = active.map(p => ({
+    name: p.name,
+    reserve: p.reserve,
+    bilingual: p.bilingual,
+    existing: existingCounts[p.name] || 0,
+    newAssigned: newCounts[p.name] || 0,
+    total: (existingCounts[p.name]||0) + (newCounts[p.name]||0),
+  }));
+  const maxTotal = Math.max(...workload.map(w => w.total), 1);
+
+  lastAssignments = assignments;
+  lastWorkload = workload;
+
+  // ── Stats
+  document.getElementById("stat-grid").style.display = "";
+  document.getElementById("s-total").textContent = assignments.length;
+  document.getElementById("s-accounts").textContent = new Set(assignments.map(a => a["Account Name"])).size;
+  document.getElementById("s-spanish").textContent = assignments.filter(a => ["spanish","español","es"].includes(a["Preferred Language"].toLowerCase())).length;
+  document.getElementById("s-specialists").textContent = active.length;
+  document.getElementById("run-date").textContent = `Run ${new Date().toLocaleString()}`;
+  document.getElementById("export-btn").style.display = "";
+
+  // ── Render
+  renderResults(assignments, workload, maxTotal);
+}
+
+function matchOwner(owner, names) {
+  const ol = owner.toLowerCase().trim();
+  if (!ol || ol === "nan" || ol === "none") return null;
+  for (const name of names) {
+    const parts = name.toLowerCase().split(" ");
+    if (parts.every(p => ol.includes(p))) return name;
+    if (name.toLowerCase() === ol || ol.includes(name.toLowerCase())) return name;
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────
+// RENDER RESULTS
+// ─────────────────────────────────────────────
+function renderResults(assignments, workload, maxTotal) {
+  const body = document.getElementById("main-body");
+
+  // Build owner filter options
+  const owners = [...new Set(assignments.map(a => a["Assigned To"]))].sort();
+  const products = [...new Set(assignments.map(a => a["Integration / Product"]).filter(Boolean))].sort();
+
+  body.innerHTML = `
+    <!-- Workload -->
+    <div class="section-title">Workload <span class="count">${workload.length} specialists</span></div>
+    <div class="workload-grid" id="wl-grid"></div>
+
+    <!-- Table section -->
+    <div class="section-title" style="margin-top:8px">
+      Assignments <span class="count" id="assign-count">${assignments.length}</span>
+    </div>
+    <div class="filters">
+      <input id="f-search" placeholder="Search case, account, installer…" oninput="applyFilters()" />
+      <select id="f-owner" onchange="applyFilters()">
+        <option value="all">All specialists</option>
+        ${owners.map(o => `<option value="${o}">${o}</option>`).join("")}
+      </select>
+      <select id="f-product" onchange="applyFilters()">
+        <option value="all">All products</option>
+        ${products.map(p => `<option value="${p}">${p}</option>`).join("")}
+      </select>
+      <select id="f-lang" onchange="applyFilters()">
+        <option value="all">All languages</option>
+        <option value="spanish">Spanish</option>
+        <option value="english">English</option>
+      </select>
+    </div>
+    <div class="table-wrap">
+      <table id="assign-table">
+        <thead>
+          <tr>
+            <th onclick="sortBy('Assigned To')">Assigned To</th>
+            <th onclick="sortBy('Case Number')">Case #</th>
+            <th onclick="sortBy('Integration / Product')">Product</th>
+            <th onclick="sortBy('Account Name')">Account</th>
+            <th onclick="sortBy('Install Date')">Install Date</th>
+            <th onclick="sortBy('Preferred Language')">Language</th>
+          </tr>
+        </thead>
+        <tbody id="assign-tbody"></tbody>
+      </table>
+      <div class="pagination">
+        <span id="page-info"></span>
+        <div class="pagination-btns">
+          <button onclick="changePage(-1)" id="prev-btn">← Prev</button>
+          <button onclick="changePage(1)" id="next-btn">Next →</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Workload bars
+  const grid = document.getElementById("wl-grid");
+  const maxT = Math.max(...workload.map(w => w.total), 1);
+  workload.forEach(w => {
+    const pct = Math.round((w.total / maxT) * 100);
+    const card = document.createElement("div");
+    card.className = "wl-card";
+    card.innerHTML = `
+      <div class="wl-name">
+        ${w.name}
+        ${w.reserve ? '<span class="badge badge-reserve" style="font-size:9px">Res</span>' : ''}
+        ${w.bilingual ? '<span class="badge badge-bilingual" style="font-size:9px">Bil</span>' : ''}
+      </div>
+      <div class="wl-meta">${w.existing} existing · <strong style="color:var(--brand)">${w.newAssigned} new</strong></div>
+      <div class="wl-bar-bg"><div class="wl-bar-fill ${w.reserve ? 'reserve' : ''}" style="width:${pct}%"></div></div>
+      <div class="wl-counts"><span>0</span><strong>${w.total} total</strong></div>
+    `;
+    grid.appendChild(card);
+  });
+
+  filteredRows = [...assignments];
+  sortCol = null;
+  renderTable();
+}
+
+function applyFilters() {
+  if (!lastAssignments) return;
+  filterText    = document.getElementById("f-search").value.toLowerCase();
+  filterOwner   = document.getElementById("f-owner").value;
+  filterProduct = document.getElementById("f-product").value;
+  filterLang    = document.getElementById("f-lang").value;
+
+  filteredRows = lastAssignments.filter(r => {
+    if (filterOwner !== "all" && r["Assigned To"] !== filterOwner) return false;
+    if (filterProduct !== "all" && r["Integration / Product"] !== filterProduct) return false;
+    if (filterLang === "spanish" && !["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
+    if (filterLang === "english" && ["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
+    if (filterText) {
+      const hay = [r["Case Number"], r["Account Name"], r["Assigned To"], r["Installer"]].join(" ").toLowerCase();
+      if (!hay.includes(filterText)) return false;
+    }
+    return true;
+  });
+
+  if (sortCol) applySortInPlace();
+  currentPage = 1;
+  document.getElementById("assign-count").textContent = filteredRows.length;
+  renderTable();
+}
+
+function sortBy(col) {
+  if (sortCol === col) sortAsc = !sortAsc;
+  else { sortCol = col; sortAsc = true; }
+  document.querySelectorAll("thead th").forEach(th => th.classList.remove("sorted"));
+  const ths = document.querySelectorAll("thead th");
+  const cols = ["Assigned To","Case Number","Integration / Product","Account Name","Install Date","Preferred Language"];
+  const idx = cols.indexOf(col);
+  if (idx >= 0 && ths[idx]) ths[idx].classList.add("sorted");
+  applySortInPlace();
+  renderTable();
+}
+
+function applySortInPlace() {
+  filteredRows.sort((a, b) => {
+    const va = String(a[sortCol]||"").toLowerCase();
+    const vb = String(b[sortCol]||"").toLowerCase();
+    return sortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+  });
+}
+
+function renderTable() {
+  const tbody = document.getElementById("assign-tbody");
+  if (!tbody) return;
+  const start = (currentPage - 1) * PAGE_SIZE;
+  const page  = filteredRows.slice(start, start + PAGE_SIZE);
+
+  if (!page.length) {
+    tbody.innerHTML = `<tr><td colspan="6" class="no-data">No cases match the current filters.</td></tr>`;
+  } else {
+    tbody.innerHTML = page.map(r => {
+      const lang = r["Preferred Language"];
+      const isSpan = ["spanish","español","es"].includes(lang.toLowerCase());
+      const langPill = isSpan ? `<span class="pill pill-green">Spanish</span>` : (lang ? `<span class="pill pill-gray">${lang}</span>` : "");
+      return `
+        <tr>
+          <td><span class="pill pill-blue">${r["Assigned To"]}</span></td>
+          <td>${r["Case Number"]}</td>
+          <td>${r["Integration / Product"]}</td>
+          <td>${r["Account Name"]}</td>
+          <td>${r["Install Date"]}</td>
+          <td>${langPill}</td>
+        </tr>`;
+    }).join("");
+  }
+
+  const total = filteredRows.length;
+  const totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+  document.getElementById("page-info").textContent = `${start+1}–${Math.min(start+PAGE_SIZE,total)} of ${total}`;
+  document.getElementById("prev-btn").disabled = currentPage <= 1;
+  document.getElementById("next-btn").disabled = currentPage >= totalPages;
+}
+
+function changePage(dir) {
+  const totalPages = Math.ceil(filteredRows.length / PAGE_SIZE) || 1;
+  currentPage = Math.max(1, Math.min(totalPages, currentPage + dir));
+  renderTable();
+}
+
+// ─────────────────────────────────────────────
+// EXPORT
+// ─────────────────────────────────────────────
+function exportCSV() {
+  if (!lastAssignments) return;
+  const cols = ["Assigned To","Case Number","Integration / Product","Account Name","Install Date","Preferred Language","Last Processing Date"];
+  const rows = [cols, ...filteredRows.map(r => cols.map(c => r[c] || ""))];
+  const csv  = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `integration_assignments_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+renderTeam();
+</script>
+</body>
+</html>
