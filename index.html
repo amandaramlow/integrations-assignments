@@ -150,8 +150,8 @@
   .filters input:focus, .filters select:focus { outline: 2px solid var(--brand); border-color: transparent; }
 
   /* ── Table ── */
-  .table-wrap { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); overflow: hidden; }
-  table { width: 100%; border-collapse: collapse; }
+  .table-wrap { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; min-width: 1200px; }
   thead th { background: var(--gray-50); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--gray-400); padding: 9px 11px; text-align: left; border-bottom: 1px solid var(--gray-200); white-space: nowrap; cursor: pointer; user-select: none; }
   thead th:hover { background: var(--gray-100); }
   thead th.sorted { color: var(--brand); }
@@ -160,6 +160,8 @@
   tbody tr:hover { background: var(--gray-50); }
   tbody tr.overdue-row { background: #fffbf0; }
   tbody tr.overdue-row:hover { background: #fff7e0; }
+  tbody tr.nonworkable-row { background: #f5f5f7; }
+  tbody tr.nonworkable-row:hover { background: #ebebee; }
   tbody td { padding: 8px 11px; font-size: 12px; }
 
   /* ── Installer group header ── */
@@ -276,6 +278,7 @@
       <div class="stat-card"><div class="lbl">Spanish</div><div class="val" id="s-spanish">0</div><div class="sub">bilingual routed</div></div>
       <div class="stat-card warn"><div class="lbl">Overdue (New)</div><div class="val" id="s-overdue">0</div><div class="sub">past install date</div></div>
       <div class="stat-card warn"><div class="lbl">Overdue (Assigned)</div><div class="val" id="s-overdue-assigned">0</div><div class="sub">already in Salesforce</div></div>
+      <div class="stat-card warn"><div class="lbl">Non-Workable</div><div class="val" id="s-nonworkable">0</div><div class="sub">parent case blocked</div></div>
       <div class="stat-card warn"><div class="lbl">OOO Cases</div><div class="val" id="s-ooo">0</div><div class="sub">need reassignment</div></div>
     </div>
   </div>
@@ -307,7 +310,12 @@ const COL = {
   PRODUCT:      "Product Name: Product Name",
   OWNER:        "Case Owner",
   PREF_LANG:    "Preferred Language",
-  LATEST_COMMENT: "Latest Update",
+  LATEST_COMMENT:   "Latest Update",
+  STATUS:           "Status",
+  SUB_STATUS:       "Sub Status",
+  PARENT_STATUS:    "Case : Parent Case : Status",
+  PARENT_BACKLOG:   "Case : Parent Case : Backlog Status",
+  BACKLOG_SUB:      "Backlog Sub Status",
 };
 const DEFAULT_TEAM = [
   { name:"Amber McWherter",  ooo:false, reserve:false, bilingual:false },
@@ -343,7 +351,7 @@ let lastAssignments = [], lastWorkload = [], lastOooCases = [];
 let filteredRows = [];
 let sortCol = null, sortAsc = true, currentPage = 1;
 const PAGE_SIZE = 50;
-let fText = "", fOwner = "all", fProduct = "all", fLang = "all", fOverdue = "all";
+let fText = "", fOwner = "all", fProduct = "all", fLang = "all", fOverdue = "all", fNonWorkable = "all";
 let viewMode = "flat"; // "flat" or "installer"
 
 function loadTeam() {
@@ -457,7 +465,10 @@ function parseReport(buffer) {
 
   const rows = [];
   for (let i = headerIdx+1; i < raw.length; i++) {
-    const obj = {}; raw[i].forEach((v,j) => { obj[headers[j]] = (v==null?"":String(v).trim()); }); rows.push(obj);
+    const obj = {};
+    // Iterate headers (not row) so trailing columns are never dropped
+    headers.forEach((h, j) => { obj[h] = (raw[i][j] == null ? "" : String(raw[i][j]).trim()); });
+    rows.push(obj);
   }
 
   // Forward-fill Account Name
@@ -594,17 +605,24 @@ function runAssignments() {
     if (account && account !== "nan") accountToSpec[account] = accountToSpec[account] || assigned;
     if (inst && inst !== "nan") instdayToSpec[inst+"|"+date] = instdayToSpec[inst+"|"+date] || assigned;
 
+    const parentBacklog = String(r[COL.PARENT_BACKLOG]||"").trim();
     assignments.push({
-      "Assigned To":           assigned,
-      "Case Number":           String(r[COL.CASE_NUM]||"").trim(),
-      "Integration / Product": String(r[COL.PRODUCT]||"").trim(),
-      "Account Name":          account,
-      "Install Date":          date,
-      "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
-      "Installer":             inst,
-      "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
-      "Last Processing Date":  today,
-      "_overdue":              overdue,
+      "Assigned To":              assigned,
+      "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
+      "Integration / Product":    String(r[COL.PRODUCT]||"").trim(),
+      "Account Name":             account,
+      "Install Date":             date,
+      "Preferred Language":       String(r[COL.PREF_LANG]||"").trim(),
+      "Installer":                inst,
+      "Status":                   String(r[COL.STATUS]||"").trim(),
+      "Sub Status":               String(r[COL.SUB_STATUS]||"").trim(),
+      "Parent Status":            String(r[COL.PARENT_STATUS]||"").trim(),
+      "Parent Backlog Status":    parentBacklog,
+      "Backlog Sub Status":       String(r[COL.BACKLOG_SUB]||"").trim(),
+      "Latest Comment":           String(r[COL.LATEST_COMMENT]||"").trim(),
+      "Last Processing Date":     today,
+      "_overdue":                 overdue,
+      "_nonWorkable":             parentBacklog.toLowerCase().includes("non-workable") || parentBacklog.toLowerCase() === "non workable",
     });
   });
 
@@ -620,18 +638,25 @@ function runAssignments() {
     const date = String(r[COL.INSTALL_DATE]||"").trim();
     if (!isOverdue(date)) return;
     const ownerRaw = String(r[COL.OWNER]||"").trim();
+    const parentBacklogOD = String(r[COL.PARENT_BACKLOG]||"").trim();
     overdueAssigned.push({
-      "Assigned To":           ownerRaw,
-      "Case Number":           String(r[COL.CASE_NUM]||"").trim(),
-      "Integration / Product": String(r[COL.PRODUCT]||"").trim(),
-      "Account Name":          String(r[COL.ACCOUNT]||"").trim(),
-      "Install Date":          date,
-      "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
-      "Installer":             String(r[COL.INSTALLER]||"").trim(),
-      "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
-      "Last Processing Date":  today,
-      "_overdue":              true,
-      "_alreadyAssigned":      true,
+      "Assigned To":              ownerRaw,
+      "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
+      "Integration / Product":    String(r[COL.PRODUCT]||"").trim(),
+      "Account Name":             String(r[COL.ACCOUNT]||"").trim(),
+      "Install Date":             date,
+      "Preferred Language":       String(r[COL.PREF_LANG]||"").trim(),
+      "Installer":                String(r[COL.INSTALLER]||"").trim(),
+      "Status":                   String(r[COL.STATUS]||"").trim(),
+      "Sub Status":               String(r[COL.SUB_STATUS]||"").trim(),
+      "Parent Status":            String(r[COL.PARENT_STATUS]||"").trim(),
+      "Parent Backlog Status":    parentBacklogOD,
+      "Backlog Sub Status":       String(r[COL.BACKLOG_SUB]||"").trim(),
+      "Latest Comment":           String(r[COL.LATEST_COMMENT]||"").trim(),
+      "Last Processing Date":     today,
+      "_overdue":                 true,
+      "_alreadyAssigned":         true,
+      "_nonWorkable":             parentBacklogOD.toLowerCase().includes("non-workable") || parentBacklogOD.toLowerCase() === "non workable",
     });
   });
 
@@ -646,6 +671,7 @@ function runAssignments() {
   document.getElementById("s-accounts").textContent  = new Set(assignments.map(a=>a["Account Name"])).size;
   document.getElementById("s-spanish").textContent   = assignments.filter(a=>["spanish","español","es"].includes(a["Preferred Language"].toLowerCase())).length;
   document.getElementById("s-overdue-assigned").textContent = overdueAssigned.length;
+  document.getElementById("s-nonworkable").textContent = lastAssignments.filter(a => a._nonWorkable).length;
   document.getElementById("s-overdue").textContent   = overdueCount;
   document.getElementById("s-ooo").textContent       = oooCases.length;
   document.getElementById("run-date").textContent    = `Run ${new Date().toLocaleString()}`;
@@ -706,6 +732,11 @@ function renderAll() {
         <option value="overdue" ${fOverdue==="overdue"?"selected":""}>⚠ Overdue only</option>
         <option value="upcoming" ${fOverdue==="upcoming"?"selected":""}>Upcoming only</option>
       </select>
+      <select id="f-nonworkable" onchange="applyFilters()">
+        <option value="all">All statuses</option>
+        <option value="nonworkable" ${fNonWorkable==="nonworkable"?"selected":""}>🚫 Non-Workable only</option>
+        <option value="workable" ${fNonWorkable==="workable"?"selected":""}>Workable only</option>
+      </select>
     </div>
 
     <div class="table-wrap">
@@ -716,6 +747,11 @@ function renderAll() {
         <th onclick="sortBy('Account Name')">Account</th>
         <th onclick="sortBy('Install Date')">Install Date</th>
         <th onclick="sortBy('Installer')">Installer</th>
+        <th onclick="sortBy('Status')">Status</th>
+        <th onclick="sortBy('Sub Status')">Sub Status</th>
+        <th onclick="sortBy('Parent Status')">Parent Status</th>
+        <th onclick="sortBy('Parent Backlog Status')">Parent Backlog</th>
+        <th onclick="sortBy('Backlog Sub Status')">Backlog Sub</th>
         <th onclick="sortBy('Preferred Language')">Language</th>
         <th>Latest Update</th>
       </tr></thead>
@@ -814,18 +850,25 @@ function autoReassignOoo() {
     const needBil = ["spanish","español","es"].includes(lang);
     const spec    = pick(needBil);
     counts[spec]++;
+    const parentBacklogRe = String(r[COL.PARENT_BACKLOG]||"").trim();
     return {
-      "Assigned To":           spec,
-      "Case Number":           String(r[COL.CASE_NUM]||"").trim(),
-      "Integration / Product": String(r[COL.PRODUCT]||"").trim(),
-      "Account Name":          String(r[COL.ACCOUNT]||"").trim(),
-      "Install Date":          String(r[COL.INSTALL_DATE]||"").trim(),
-      "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
-      "Installer":             String(r[COL.INSTALLER]||"").trim(),
-      "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
-      "Last Processing Date":  today,
-      "_overdue":              isOverdue(String(r[COL.INSTALL_DATE]||"")),
-      "_reassigned":           true,
+      "Assigned To":              spec,
+      "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
+      "Integration / Product":    String(r[COL.PRODUCT]||"").trim(),
+      "Account Name":             String(r[COL.ACCOUNT]||"").trim(),
+      "Install Date":             String(r[COL.INSTALL_DATE]||"").trim(),
+      "Preferred Language":       String(r[COL.PREF_LANG]||"").trim(),
+      "Installer":                String(r[COL.INSTALLER]||"").trim(),
+      "Status":                   String(r[COL.STATUS]||"").trim(),
+      "Sub Status":               String(r[COL.SUB_STATUS]||"").trim(),
+      "Parent Status":            String(r[COL.PARENT_STATUS]||"").trim(),
+      "Parent Backlog Status":    parentBacklogRe,
+      "Backlog Sub Status":       String(r[COL.BACKLOG_SUB]||"").trim(),
+      "Latest Comment":           String(r[COL.LATEST_COMMENT]||"").trim(),
+      "Last Processing Date":     today,
+      "_overdue":                 isOverdue(String(r[COL.INSTALL_DATE]||"")),
+      "_reassigned":              true,
+      "_nonWorkable":             parentBacklogRe.toLowerCase().includes("non-workable") || parentBacklogRe.toLowerCase() === "non workable",
     };
   });
 
@@ -845,11 +888,12 @@ function autoReassignOoo() {
 // FILTERS + SORT + TABLE
 // ─────────────────────────────────────────────
 function applyFilters() {
-  fText    = (document.getElementById("f-search")?.value||"").toLowerCase();
-  fOwner   = document.getElementById("f-owner")?.value   || "all";
-  fProduct = document.getElementById("f-product")?.value || "all";
-  fLang    = document.getElementById("f-lang")?.value    || "all";
-  fOverdue = document.getElementById("f-overdue")?.value || "all";
+  fText        = (document.getElementById("f-search")?.value||"").toLowerCase();
+  fOwner       = document.getElementById("f-owner")?.value       || "all";
+  fProduct     = document.getElementById("f-product")?.value     || "all";
+  fLang        = document.getElementById("f-lang")?.value        || "all";
+  fOverdue     = document.getElementById("f-overdue")?.value     || "all";
+  fNonWorkable = document.getElementById("f-nonworkable")?.value || "all";
 
   filteredRows = lastAssignments.filter(r => {
     if (fOwner !== "all"   && r["Assigned To"] !== fOwner) return false;
@@ -858,6 +902,8 @@ function applyFilters() {
     if (fLang === "english"  && ["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
     if (fOverdue === "overdue"   && !r._overdue) return false;
     if (fOverdue === "upcoming"  && r._overdue)  return false;
+    if (fNonWorkable === "nonworkable" && !r._nonWorkable) return false;
+    if (fNonWorkable === "workable"    && r._nonWorkable)  return false;
     if (fText) {
       const hay = [r["Case Number"],r["Account Name"],r["Assigned To"],r["Installer"]].join(" ").toLowerCase();
       if (!hay.includes(fText)) return false;
@@ -903,7 +949,7 @@ function renderTable() {
 
   const page = filteredRows.slice(start, start+PAGE_SIZE);
   if (!page.length) {
-    tbody.innerHTML = `<tr><td colspan="8" class="no-data">No cases match the current filters.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="13" class="no-data">No cases match the current filters.</td></tr>`;
   } else {
     tbody.innerHTML = page.map(r => rowHtml(r)).join("");
   }
@@ -918,22 +964,36 @@ function rowHtml(r) {
   const isSpan   = ["spanish","español","es"].includes(lang.toLowerCase());
   const langPill = isSpan ? `<span class="pill pill-green">Spanish</span>` : (lang ? `<span class="pill pill-gray">${lang}</span>` : "");
   const prodCls  = productClass(r["Integration / Product"]);
-  const overdueBadge    = r._overdue ? `<span class="pill pill-red" style="margin-left:4px">Overdue</span>` : "";
-  const reasgnBadge     = r._reassigned ? `<span class="pill" style="background:var(--purple-light);color:var(--purple);margin-left:4px">Reassigned</span>` : "";
-  const alreadyBadge    = r._alreadyAssigned ? `<span class="pill pill-gray" style="margin-left:4px">In Salesforce</span>` : "";
-  const assignedPill    = r._alreadyAssigned
+  const overdueBadge   = r._overdue     ? `<span class="pill pill-red" style="margin-left:4px">Overdue</span>` : "";
+  const reasgnBadge    = r._reassigned  ? `<span class="pill" style="background:var(--purple-light);color:var(--purple);margin-left:4px">Reassigned</span>` : "";
+  const alreadyBadge   = r._alreadyAssigned ? `<span class="pill pill-gray" style="margin-left:4px">In SF</span>` : "";
+  const nwBadge        = r._nonWorkable ? `<span class="pill" style="background:#1f1f23;color:#fff;margin-left:4px">🚫 Non-Workable</span>` : "";
+  const assignedPill   = r._alreadyAssigned
     ? `<span class="pill pill-gray">${r["Assigned To"]}</span>`
     : `<span class="pill pill-blue">${r["Assigned To"]}</span>`;
-  return `<tr class="${r._overdue?'overdue-row':''}">
-    <td>${assignedPill}${reasgnBadge}${alreadyBadge}</td>
+  const rowClass = r._nonWorkable ? "nonworkable-row" : (r._overdue ? "overdue-row" : "");
+
+  const statusCell = v => v ? `<span style="font-size:11px;color:var(--gray-700)">${v}</span>` : `<span style="color:var(--gray-200)">—</span>`;
+  const parentBacklog = r["Parent Backlog Status"] || "";
+  const backlogCell = parentBacklog
+    ? `<span class="pill ${parentBacklog.toLowerCase().includes("non-workable")||parentBacklog.toLowerCase()==="non workable" ? 'pill-gray" style="background:#1f1f23;color:#fff' : 'pill-gray'}">${parentBacklog}</span>`
+    : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
+
+  return `<tr class="${rowClass}">
+    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${nwBadge}</td>
     <td>${r["Case Number"]}</td>
     <td><span class="pill ${prodCls}">${r["Integration / Product"]}</span></td>
     <td>${r["Account Name"]}</td>
-    <td>${r["Install Date"]}${overdueBadge}</td>
+    <td style="white-space:nowrap">${r["Install Date"]}${overdueBadge}</td>
     <td style="color:var(--gray-400);font-size:11px">${r["Installer"]||""}</td>
+    <td>${statusCell(r["Status"])}</td>
+    <td>${statusCell(r["Sub Status"])}</td>
+    <td>${statusCell(r["Parent Status"])}</td>
+    <td>${backlogCell}</td>
+    <td>${statusCell(r["Backlog Sub Status"])}</td>
     <td>${langPill}</td>
-    <td style="max-width:220px;font-size:11px;color:var(--gray-700);">
-      ${r["Latest Comment"] ? `<span title="${r["Latest Comment"].replace(/"/g,'&quot;')}">${r["Latest Comment"].length > 80 ? r["Latest Comment"].slice(0,80)+"…" : r["Latest Comment"]}</span>` : ""}
+    <td style="max-width:200px;font-size:11px;color:var(--gray-700);">
+      ${r["Latest Comment"] ? `<span title="${r["Latest Comment"].replace(/"/g,'&quot;')}">${r["Latest Comment"].length > 70 ? r["Latest Comment"].slice(0,70)+"…" : r["Latest Comment"]}</span>` : ""}
     </td>
   </tr>`;
 }
@@ -949,7 +1009,7 @@ function renderInstallerView(tbody, rows) {
   const sortedKeys = Object.keys(groups).sort();
   tbody.innerHTML = sortedKeys.map(key => {
     const g = groups[key];
-    const hdr = `<tr class="installer-group-hdr"><td colspan="8">📅 ${g.installer} &mdash; ${g.date} <span style="font-weight:400;color:var(--gray-400)">(${g.rows.length} case${g.rows.length>1?"s":""})</span></td></tr>`;
+    const hdr = `<tr class="installer-group-hdr"><td colspan="13">📅 ${g.installer} &mdash; ${g.date} <span style="font-weight:400;color:var(--gray-400)">(${g.rows.length} case${g.rows.length>1?"s":""})</span></td></tr>`;
     return hdr + g.rows.map(r => rowHtml(r)).join("");
   }).join("") || `<tr><td colspan="7" class="no-data">No cases match the current filters.</td></tr>`;
 }
@@ -966,7 +1026,7 @@ function changePage(dir) {
 function exportCSV(filteredOnly) {
   const rows = filteredOnly ? filteredRows : lastAssignments;
   if (!rows.length) return;
-  const cols = ["Assigned To","Case Number","Integration / Product","Account Name","Install Date","Preferred Language","Installer","Latest Comment","Last Processing Date"];
+  const cols = ["Assigned To","Case Number","Integration / Product","Account Name","Install Date","Installer","Status","Sub Status","Parent Status","Parent Backlog Status","Backlog Sub Status","Preferred Language","Latest Comment","Last Processing Date"];
   const data = [cols, ...rows.map(r => cols.map(c => r[c]||""))];
   const csv  = data.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], {type:"text/csv"});
