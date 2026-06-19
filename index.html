@@ -162,6 +162,8 @@
   tbody tr.overdue-row:hover { background: #fff7e0; }
   tbody tr.nonworkable-row { background: #f5f5f7; }
   tbody tr.nonworkable-row:hover { background: #ebebee; }
+  tbody tr.unassigned-row { background: #fafafe; }
+  tbody tr.unassigned-row:hover { background: #f0f0fa; }
   tbody td { padding: 8px 11px; font-size: 12px; }
 
   /* ── Installer group header ── */
@@ -281,7 +283,7 @@
       <div class="stat-card warn"><div class="lbl">Non-Workable</div><div class="val" id="s-nonworkable">0</div><div class="sub">parent case blocked</div></div>
       <div class="stat-card warn"><div class="lbl">Cancelled</div><div class="val" id="s-cancelled">0</div><div class="sub">parent case cancelled</div></div>
       <div class="stat-card warn"><div class="lbl">OOO Cases</div><div class="val" id="s-ooo">0</div><div class="sub">need reassignment</div></div>
-      <div class="stat-card"><div class="lbl">Unassigned</div><div class="val" id="s-unassigned">0</div><div class="sub">no install date</div></div>
+      <div class="stat-card"><div class="lbl">Unassigned</div><div class="val" id="s-unassigned">0</div><div class="sub">in queue</div></div>
     </div>
   </div>
 
@@ -671,30 +673,42 @@ function runAssignments() {
     });
   });
 
-  // Collect unassigned cases with no install date
+  // Collect ALL unassigned cases (with or without install date)
   const unassigned = [];
+  // Track case numbers already in assignments/flaggedAssigned to avoid dupes
+  const assignedCaseNums = new Set([...assignments, ...flaggedAssigned].map(a => a["Case Number"]));
   reportRows.forEach(r => {
-    const owner = String(r[COL.OWNER]||"").trim().toLowerCase();
+    const owner = String(r[COL.OWNER]||"").trim().replace(/^\[|\]$/g,"").toLowerCase();
     const inst  = String(r[COL.INSTALL_DATE]||"").trim();
+    const caseNum = String(r[COL.CASE_NUM]||"").trim();
     const isUnassigned = UNASSIGNED.has(owner) || !owner;
-    const hasInstall   = inst && inst !== "nan" && inst !== "None" && inst !== "";
-    if (isUnassigned && !hasInstall) {
+    if (isUnassigned && !assignedCaseNums.has(caseNum)) {
+      const pb = String(r[COL.PARENT_BACKLOG]||"").trim();
+      const ps = String(r[COL.PARENT_STATUS]||"").trim();
+      const hasInstall = inst && inst !== "nan" && inst !== "None";
       unassigned.push({
-        "Case Number":           String(r[COL.CASE_NUM]||"").trim(),
+        "Assigned To":           "— Unassigned —",
+        "Case Number":           caseNum,
         "Integration / Product": String(r[COL.PRODUCT]||"").trim(),
         "Account Name":          String(r[COL.ACCOUNT]||"").trim(),
+        "Install Date":          hasInstall ? inst : "",
         "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
+        "Installer":             String(r[COL.INSTALLER]||"").trim(),
         "Status":                String(r[COL.STATUS]||"").trim(),
         "Sub Status":            String(r[COL.SUB_STATUS]||"").trim(),
-        "Parent Status":         String(r[COL.PARENT_STATUS]||"").trim(),
-        "Parent Backlog Status": String(r[COL.PARENT_BACKLOG]||"").trim(),
+        "Parent Status":         ps,
+        "Parent Backlog Status": pb,
         "Backlog Sub Status":    String(r[COL.BACKLOG_SUB]||"").trim(),
         "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
+        "Last Processing Date":  "",
+        "_unassigned":           true,
+        "_nonWorkable":          isNonWorkableFn(pb),
+        "_cancelled":            isCancelledFn(ps),
       });
     }
   });
 
-  lastAssignments = [...assignments, ...flaggedAssigned];
+  lastAssignments = [...assignments, ...flaggedAssigned, ...unassigned];
   lastWorkload    = workload;
   lastOooCases    = oooCases;
   lastUnassigned  = unassigned;
@@ -722,7 +736,7 @@ function runAssignments() {
 // ─────────────────────────────────────────────
 function renderAll() {
   const scroll = document.getElementById("main-scroll");
-  const owners   = [...new Set(lastAssignments.map(a=>a["Assigned To"]))].sort();
+  const owners   = [...new Set(lastAssignments.map(a=>a["Assigned To"]).filter(o=>o && o!=="— Unassigned —"))].sort();
   const products = [...new Set(lastAssignments.map(a=>a["Integration / Product"]).filter(Boolean))].sort();
 
   const overdueCount = lastAssignments.filter(a=>a._overdue).length;
@@ -753,6 +767,7 @@ function renderAll() {
       <input id="f-search" placeholder="Search case, account, installer…" oninput="applyFilters()" value="${fText}" />
       <select id="f-owner" onchange="applyFilters()">
         <option value="all">All specialists</option>
+        <option value="— Unassigned —" ${fOwner==="— Unassigned —"?"selected":""}>— Unassigned —</option>
         ${owners.map(o=>`<option value="${o}" ${fOwner===o?"selected":""}>${o}</option>`).join("")}
       </select>
       <select id="f-product" onchange="applyFilters()">
@@ -804,48 +819,12 @@ function renderAll() {
       </div>
     </div>
 
-    ${lastUnassigned.length ? `
-    <div style="margin-top:24px">
-      <div class="sec-header">
-        <div class="sec-title">
-          Unassigned — No Install Date
-          <span class="count" style="background:var(--yellow-light);color:var(--yellow)" id="u-count">${lastUnassigned.length}</span>
-        </div>
-      </div>
-      <p style="font-size:12px;color:var(--gray-400);margin-bottom:10px">These cases are in the unassigned queue but have no install date set. They cannot be auto-assigned until an install date is added in Salesforce.</p>
-      <div class="filters">
-        <input id="u-search" placeholder="Search case or account…" oninput="renderUnassigned()" />
-        <select id="u-product" onchange="renderUnassigned()">
-          <option value="all">All products</option>
-          ${[...new Set(lastUnassigned.map(r=>r["Integration / Product"]).filter(Boolean))].sort().map(p=>`<option value="${p}">${p}</option>`).join("")}
-        </select>
-        <select id="u-status" onchange="renderUnassigned()">
-          <option value="all">All statuses</option>
-          ${[...new Set(lastUnassigned.map(r=>r["Parent Backlog Status"]).filter(Boolean))].sort().map(s=>`<option value="${s}">${s}</option>`).join("")}
-        </select>
-      </div>
-      <div class="table-wrap">
-        <table><thead><tr>
-          <th onclick="uSortBy('Case Number')">Case #</th>
-          <th onclick="uSortBy('Integration / Product')">Product</th>
-          <th onclick="uSortBy('Account Name')">Account</th>
-          <th onclick="uSortBy('Status')">Status</th>
-          <th onclick="uSortBy('Sub Status')">Sub Status</th>
-          <th onclick="uSortBy('Parent Status')">Parent Status</th>
-          <th onclick="uSortBy('Parent Backlog Status')">Parent Backlog</th>
-          <th onclick="uSortBy('Preferred Language')">Language</th>
-          <th>Latest Update</th>
-        </tr></thead>
-        <tbody id="u-tbody"></tbody></table>
-      </div>
-    </div>` : ""}
   `;
 
   renderWorkload();
   filteredRows = [...lastAssignments];
   currentPage  = 1;
   applyFilters();
-  if (lastUnassigned.length) renderUnassigned();
 }
 
 function renderOooWarning() {
@@ -1048,10 +1027,12 @@ function rowHtml(r) {
   const alreadyBadge   = r._alreadyAssigned ? `<span class="pill pill-gray" style="margin-left:4px">In SF</span>` : "";
   const nwBadge        = r._nonWorkable ? `<span class="pill" style="background:#1f1f23;color:#fff;margin-left:4px">🚫 Non-Workable</span>` : "";
   const cancelBadge    = r._cancelled   ? `<span class="pill" style="background:#6B21A8;color:#fff;margin-left:4px">❌ Cancelled</span>` : "";
-  const assignedPill   = r._alreadyAssigned
-    ? `<span class="pill pill-gray">${r["Assigned To"]}</span>`
-    : `<span class="pill pill-blue">${r["Assigned To"]}</span>`;
-  const rowClass = r._nonWorkable ? "nonworkable-row" : (r._overdue ? "overdue-row" : "");
+  const assignedPill   = r._unassigned
+    ? `<span class="pill pill-gray" style="color:var(--gray-400);font-style:italic">Unassigned</span>`
+    : r._alreadyAssigned
+      ? `<span class="pill pill-gray">${r["Assigned To"]}</span>`
+      : `<span class="pill pill-blue">${r["Assigned To"]}</span>`;
+  const rowClass = r._unassigned ? "unassigned-row" : (r._nonWorkable ? "nonworkable-row" : (r._overdue ? "overdue-row" : ""));
 
   const statusCell = v => v ? `<span style="font-size:11px;color:var(--gray-700)">${v}</span>` : `<span style="color:var(--gray-200)">—</span>`;
   const parentBacklog = r["Parent Backlog Status"] || "";
