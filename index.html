@@ -281,6 +281,7 @@
       <div class="stat-card warn"><div class="lbl">Non-Workable</div><div class="val" id="s-nonworkable">0</div><div class="sub">parent case blocked</div></div>
       <div class="stat-card warn"><div class="lbl">Cancelled</div><div class="val" id="s-cancelled">0</div><div class="sub">parent case cancelled</div></div>
       <div class="stat-card warn"><div class="lbl">OOO Cases</div><div class="val" id="s-ooo">0</div><div class="sub">need reassignment</div></div>
+      <div class="stat-card"><div class="lbl">Unassigned</div><div class="val" id="s-unassigned">0</div><div class="sub">no install date</div></div>
     </div>
   </div>
 
@@ -348,7 +349,8 @@ function productClass(prod) {
 let team = loadTeam();
 let departed = loadDeparted();
 let reportRows = null;
-let lastAssignments = [], lastWorkload = [], lastOooCases = [];
+let lastAssignments = [], lastWorkload = [], lastOooCases = [], lastUnassigned = [];
+let uFilterProduct = "all", uFilterText = "";
 let filteredRows = [];
 let sortCol = null, sortAsc = true, currentPage = 1;
 const PAGE_SIZE = 50;
@@ -668,9 +670,33 @@ function runAssignments() {
     });
   });
 
+  // Collect unassigned cases with no install date
+  const unassigned = [];
+  reportRows.forEach(r => {
+    const owner = String(r[COL.OWNER]||"").trim().toLowerCase();
+    const inst  = String(r[COL.INSTALL_DATE]||"").trim();
+    const isUnassigned = UNASSIGNED.has(owner) || !owner;
+    const hasInstall   = inst && inst !== "nan" && inst !== "None" && inst !== "";
+    if (isUnassigned && !hasInstall) {
+      unassigned.push({
+        "Case Number":           String(r[COL.CASE_NUM]||"").trim(),
+        "Integration / Product": String(r[COL.PRODUCT]||"").trim(),
+        "Account Name":          String(r[COL.ACCOUNT]||"").trim(),
+        "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
+        "Status":                String(r[COL.STATUS]||"").trim(),
+        "Sub Status":            String(r[COL.SUB_STATUS]||"").trim(),
+        "Parent Status":         String(r[COL.PARENT_STATUS]||"").trim(),
+        "Parent Backlog Status": String(r[COL.PARENT_BACKLOG]||"").trim(),
+        "Backlog Sub Status":    String(r[COL.BACKLOG_SUB]||"").trim(),
+        "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
+      });
+    }
+  });
+
   lastAssignments = [...assignments, ...flaggedAssigned];
   lastWorkload    = workload;
   lastOooCases    = oooCases;
+  lastUnassigned  = unassigned;
 
   // Stats
   const overdueCount = lastAssignments.filter(a => a._overdue).length;
@@ -682,7 +708,8 @@ function runAssignments() {
   document.getElementById("s-nonworkable").textContent = lastAssignments.filter(a => a._nonWorkable).length;
   document.getElementById("s-cancelled").textContent   = lastAssignments.filter(a => a._cancelled).length;
   document.getElementById("s-overdue").textContent   = overdueCount;
-  document.getElementById("s-ooo").textContent       = oooCases.length;
+  document.getElementById("s-ooo").textContent        = oooCases.length;
+  document.getElementById("s-unassigned").textContent = unassigned.length;
   document.getElementById("run-date").textContent    = `Run ${new Date().toLocaleString()}`;
   document.getElementById("header-actions").style.display = "";
 
@@ -775,12 +802,49 @@ function renderAll() {
         </div>
       </div>
     </div>
+
+    ${lastUnassigned.length ? `
+    <div style="margin-top:24px">
+      <div class="sec-header">
+        <div class="sec-title">
+          Unassigned — No Install Date
+          <span class="count" style="background:var(--yellow-light);color:var(--yellow)" id="u-count">${lastUnassigned.length}</span>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--gray-400);margin-bottom:10px">These cases are in the unassigned queue but have no install date set. They cannot be auto-assigned until an install date is added in Salesforce.</p>
+      <div class="filters">
+        <input id="u-search" placeholder="Search case or account…" oninput="renderUnassigned()" />
+        <select id="u-product" onchange="renderUnassigned()">
+          <option value="all">All products</option>
+          ${[...new Set(lastUnassigned.map(r=>r["Integration / Product"]).filter(Boolean))].sort().map(p=>`<option value="${p}">${p}</option>`).join("")}
+        </select>
+        <select id="u-status" onchange="renderUnassigned()">
+          <option value="all">All statuses</option>
+          ${[...new Set(lastUnassigned.map(r=>r["Parent Backlog Status"]).filter(Boolean))].sort().map(s=>`<option value="${s}">${s}</option>`).join("")}
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table><thead><tr>
+          <th onclick="uSortBy('Case Number')">Case #</th>
+          <th onclick="uSortBy('Integration / Product')">Product</th>
+          <th onclick="uSortBy('Account Name')">Account</th>
+          <th onclick="uSortBy('Status')">Status</th>
+          <th onclick="uSortBy('Sub Status')">Sub Status</th>
+          <th onclick="uSortBy('Parent Status')">Parent Status</th>
+          <th onclick="uSortBy('Parent Backlog Status')">Parent Backlog</th>
+          <th onclick="uSortBy('Preferred Language')">Language</th>
+          <th>Latest Update</th>
+        </tr></thead>
+        <tbody id="u-tbody"></tbody></table>
+      </div>
+    </div>` : ""}
   `;
 
   renderWorkload();
   filteredRows = [...lastAssignments];
   currentPage  = 1;
   applyFilters();
+  if (lastUnassigned.length) renderUnassigned();
 }
 
 function renderOooWarning() {
@@ -1033,6 +1097,72 @@ function changePage(dir) {
   const totalPages = Math.ceil(filteredRows.length/PAGE_SIZE)||1;
   currentPage = Math.max(1, Math.min(totalPages, currentPage+dir));
   renderTable();
+}
+
+// ─────────────────────────────────────────────
+// UNASSIGNED TABLE
+// ─────────────────────────────────────────────
+let uSortCol = null, uSortAsc = true;
+
+function renderUnassigned() {
+  const tbody = document.getElementById("u-tbody"); if (!tbody) return;
+  const search  = (document.getElementById("u-search")?.value||"").toLowerCase();
+  const product = document.getElementById("u-product")?.value || "all";
+  const status  = document.getElementById("u-status")?.value  || "all";
+
+  let rows = lastUnassigned.filter(r => {
+    if (product !== "all" && r["Integration / Product"] !== product) return false;
+    if (status  !== "all" && r["Parent Backlog Status"]  !== status)  return false;
+    if (search) {
+      const hay = [r["Case Number"], r["Account Name"]].join(" ").toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
+  if (uSortCol) {
+    rows.sort((a,b) => {
+      const va = String(a[uSortCol]||"").toLowerCase(), vb = String(b[uSortCol]||"").toLowerCase();
+      return uSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+  }
+
+  const countEl = document.getElementById("u-count");
+  if (countEl) countEl.textContent = rows.length;
+
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="9" class="no-data">No unassigned cases match the filters.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const lang    = r["Preferred Language"];
+    const isSpan  = ["spanish","español","es"].includes(lang.toLowerCase());
+    const langPill = isSpan ? `<span class="pill pill-green">Spanish</span>` : (lang ? `<span class="pill pill-gray">${lang}</span>` : "");
+    const prodCls  = productClass(r["Integration / Product"]);
+    const pb = r["Parent Backlog Status"];
+    const nwBadge = isNonWorkableFn(pb) ? `<span class="pill" style="background:#1f1f23;color:#fff;margin-left:4px;font-size:9px">🚫</span>` : "";
+    const canBadge = isCancelledFn(r["Parent Status"]) ? `<span class="pill" style="background:#6B21A8;color:#fff;margin-left:4px;font-size:9px">❌</span>` : "";
+    const statusCell = v => v ? `<span style="font-size:11px;color:var(--gray-700)">${v}</span>` : `<span style="color:var(--gray-200)">—</span>`;
+    return `<tr>
+      <td>${r["Case Number"]}</td>
+      <td><span class="pill ${prodCls}">${r["Integration / Product"]}</span></td>
+      <td>${r["Account Name"]}</td>
+      <td>${statusCell(r["Status"])}</td>
+      <td>${statusCell(r["Sub Status"])}</td>
+      <td>${statusCell(r["Parent Status"])}${canBadge}</td>
+      <td>${pb ? `<span class="pill pill-gray">${pb}</span>` : "—"}${nwBadge}</td>
+      <td>${langPill}</td>
+      <td style="max-width:200px;font-size:11px;color:var(--gray-700)">
+        ${r["Latest Comment"] ? `<span title="${r["Latest Comment"].replace(/"/g,'&quot;')}">${r["Latest Comment"].length>70?r["Latest Comment"].slice(0,70)+"…":r["Latest Comment"]}</span>` : ""}
+      </td>
+    </tr>`;
+  }).join("");
+}
+
+function uSortBy(col) {
+  if (uSortCol === col) uSortAsc = !uSortAsc; else { uSortCol = col; uSortAsc = true; }
+  renderUnassigned();
 }
 
 // ─────────────────────────────────────────────
