@@ -302,6 +302,7 @@ const UNASSIGNED = new Set([
   "default case queue (no assignment)",
   "integrations activations",
   "integrations activations queue",
+  "integrations activations (no assignment)",
   ""
 ]);
 const COL = {
@@ -546,7 +547,7 @@ function runAssignments() {
   const toAssign = [], alreadyDone = [], oooCases = [];
 
   reportRows.forEach(r => {
-    const owner = String(r[COL.OWNER]||"").trim().toLowerCase();
+    const owner = String(r[COL.OWNER]||"").trim().replace(/^\[|\]$/g,"").toLowerCase();
     const inst  = String(r[COL.INSTALL_DATE]||"").trim();
     const isUnassigned = UNASSIGNED.has(owner) || !owner;
     const hasInstall   = inst && inst !== "nan" && inst !== "None" && inst !== "";
