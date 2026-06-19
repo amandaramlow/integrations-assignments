@@ -279,6 +279,7 @@
       <div class="stat-card warn"><div class="lbl">Overdue (New)</div><div class="val" id="s-overdue">0</div><div class="sub">past install date</div></div>
       <div class="stat-card warn"><div class="lbl">Overdue (Assigned)</div><div class="val" id="s-overdue-assigned">0</div><div class="sub">already in Salesforce</div></div>
       <div class="stat-card warn"><div class="lbl">Non-Workable</div><div class="val" id="s-nonworkable">0</div><div class="sub">parent case blocked</div></div>
+      <div class="stat-card warn"><div class="lbl">Cancelled</div><div class="val" id="s-cancelled">0</div><div class="sub">parent case cancelled</div></div>
       <div class="stat-card warn"><div class="lbl">OOO Cases</div><div class="val" id="s-ooo">0</div><div class="sub">need reassignment</div></div>
     </div>
   </div>
@@ -505,6 +506,8 @@ function isOverdue(dateStr) {
   const today = new Date(); today.setHours(0,0,0,0);
   return d < today;
 }
+function isNonWorkableFn(s) { const l = (s||"").toLowerCase().trim(); return l.includes("non-workable") || l === "non workable"; }
+function isCancelledFn(s)    { const l = (s||"").toLowerCase().trim(); return l === "cancelled" || l === "canceled"; }
 
 // ─────────────────────────────────────────────
 // NAME MATCHING
@@ -622,7 +625,8 @@ function runAssignments() {
       "Latest Comment":           String(r[COL.LATEST_COMMENT]||"").trim(),
       "Last Processing Date":     today,
       "_overdue":                 overdue,
-      "_nonWorkable":             parentBacklog.toLowerCase().includes("non-workable") || parentBacklog.toLowerCase() === "non workable",
+      "_nonWorkable":             isNonWorkableFn(parentBacklog),
+      "_cancelled":               isCancelledFn(String(r[COL.PARENT_STATUS]||"")),
     });
   });
 
@@ -632,15 +636,18 @@ function runAssignments() {
     total: (existingCounts[p.name]||0)+(newCounts[p.name]||0),
   }));
 
-  // Collect already-assigned overdue cases (visible but not newly assigned)
-  const overdueAssigned = [];
+  // Collect already-assigned cases that need attention (overdue, non-workable, or cancelled parent)
+  const flaggedAssigned = [];
   alreadyDone.forEach(r => {
-    const date = String(r[COL.INSTALL_DATE]||"").trim();
-    if (!isOverdue(date)) return;
-    const ownerRaw = String(r[COL.OWNER]||"").trim();
-    const parentBacklogOD = String(r[COL.PARENT_BACKLOG]||"").trim();
-    overdueAssigned.push({
-      "Assigned To":              ownerRaw,
+    const date          = String(r[COL.INSTALL_DATE]||"").trim();
+    const parentBacklog = String(r[COL.PARENT_BACKLOG]||"").trim();
+    const parentStatus  = String(r[COL.PARENT_STATUS]||"").trim();
+    const overdue       = isOverdue(date);
+    const nonWorkable   = isNonWorkableFn(parentBacklog);
+    const cancelled     = isCancelledFn(parentStatus);
+    if (!overdue && !nonWorkable && !cancelled) return;
+    flaggedAssigned.push({
+      "Assigned To":              String(r[COL.OWNER]||"").trim(),
       "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
       "Integration / Product":    String(r[COL.PRODUCT]||"").trim(),
       "Account Name":             String(r[COL.ACCOUNT]||"").trim(),
@@ -649,18 +656,19 @@ function runAssignments() {
       "Installer":                String(r[COL.INSTALLER]||"").trim(),
       "Status":                   String(r[COL.STATUS]||"").trim(),
       "Sub Status":               String(r[COL.SUB_STATUS]||"").trim(),
-      "Parent Status":            String(r[COL.PARENT_STATUS]||"").trim(),
-      "Parent Backlog Status":    parentBacklogOD,
+      "Parent Status":            parentStatus,
+      "Parent Backlog Status":    parentBacklog,
       "Backlog Sub Status":       String(r[COL.BACKLOG_SUB]||"").trim(),
       "Latest Comment":           String(r[COL.LATEST_COMMENT]||"").trim(),
       "Last Processing Date":     today,
-      "_overdue":                 true,
+      "_overdue":                 overdue,
       "_alreadyAssigned":         true,
-      "_nonWorkable":             parentBacklogOD.toLowerCase().includes("non-workable") || parentBacklogOD.toLowerCase() === "non workable",
+      "_nonWorkable":             nonWorkable,
+      "_cancelled":               cancelled,
     });
   });
 
-  lastAssignments = [...assignments, ...overdueAssigned];
+  lastAssignments = [...assignments, ...flaggedAssigned];
   lastWorkload    = workload;
   lastOooCases    = oooCases;
 
@@ -670,8 +678,9 @@ function runAssignments() {
   document.getElementById("s-total").textContent     = assignments.length;
   document.getElementById("s-accounts").textContent  = new Set(assignments.map(a=>a["Account Name"])).size;
   document.getElementById("s-spanish").textContent   = assignments.filter(a=>["spanish","español","es"].includes(a["Preferred Language"].toLowerCase())).length;
-  document.getElementById("s-overdue-assigned").textContent = overdueAssigned.length;
+  document.getElementById("s-overdue-assigned").textContent = lastAssignments.filter(a => a._overdue && a._alreadyAssigned).length;
   document.getElementById("s-nonworkable").textContent = lastAssignments.filter(a => a._nonWorkable).length;
+  document.getElementById("s-cancelled").textContent   = lastAssignments.filter(a => a._cancelled).length;
   document.getElementById("s-overdue").textContent   = overdueCount;
   document.getElementById("s-ooo").textContent       = oooCases.length;
   document.getElementById("run-date").textContent    = `Run ${new Date().toLocaleString()}`;
@@ -734,8 +743,10 @@ function renderAll() {
       </select>
       <select id="f-nonworkable" onchange="applyFilters()">
         <option value="all">All statuses</option>
-        <option value="nonworkable" ${fNonWorkable==="nonworkable"?"selected":""}>🚫 Non-Workable only</option>
-        <option value="workable" ${fNonWorkable==="workable"?"selected":""}>Workable only</option>
+        <option value="nonworkable" ${fNonWorkable==="nonworkable"?"selected":""}>🚫 Non-Workable</option>
+        <option value="cancelled"   ${fNonWorkable==="cancelled"?"selected":""}>❌ Cancelled parent</option>
+        <option value="flagged"     ${fNonWorkable==="flagged"?"selected":""}>⚠ Non-Workable + Cancelled</option>
+        <option value="workable"    ${fNonWorkable==="workable"?"selected":""}>Workable only</option>
       </select>
     </div>
 
@@ -868,7 +879,8 @@ function autoReassignOoo() {
       "Last Processing Date":     today,
       "_overdue":                 isOverdue(String(r[COL.INSTALL_DATE]||"")),
       "_reassigned":              true,
-      "_nonWorkable":             parentBacklogRe.toLowerCase().includes("non-workable") || parentBacklogRe.toLowerCase() === "non workable",
+      "_nonWorkable":             isNonWorkableFn(parentBacklogRe),
+      "_cancelled":               isCancelledFn(String(r[COL.PARENT_STATUS]||"")),
     };
   });
 
@@ -902,8 +914,10 @@ function applyFilters() {
     if (fLang === "english"  && ["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
     if (fOverdue === "overdue"   && !r._overdue) return false;
     if (fOverdue === "upcoming"  && r._overdue)  return false;
-    if (fNonWorkable === "nonworkable" && !r._nonWorkable) return false;
-    if (fNonWorkable === "workable"    && r._nonWorkable)  return false;
+    if (fNonWorkable === "nonworkable" && !r._nonWorkable)               return false;
+    if (fNonWorkable === "cancelled"  && !r._cancelled)                  return false;
+    if (fNonWorkable === "flagged"    && !r._nonWorkable && !r._cancelled) return false;
+    if (fNonWorkable === "workable"   && (r._nonWorkable || r._cancelled)) return false;
     if (fText) {
       const hay = [r["Case Number"],r["Account Name"],r["Assigned To"],r["Installer"]].join(" ").toLowerCase();
       if (!hay.includes(fText)) return false;
@@ -968,6 +982,7 @@ function rowHtml(r) {
   const reasgnBadge    = r._reassigned  ? `<span class="pill" style="background:var(--purple-light);color:var(--purple);margin-left:4px">Reassigned</span>` : "";
   const alreadyBadge   = r._alreadyAssigned ? `<span class="pill pill-gray" style="margin-left:4px">In SF</span>` : "";
   const nwBadge        = r._nonWorkable ? `<span class="pill" style="background:#1f1f23;color:#fff;margin-left:4px">🚫 Non-Workable</span>` : "";
+  const cancelBadge    = r._cancelled   ? `<span class="pill" style="background:#6B21A8;color:#fff;margin-left:4px">❌ Cancelled</span>` : "";
   const assignedPill   = r._alreadyAssigned
     ? `<span class="pill pill-gray">${r["Assigned To"]}</span>`
     : `<span class="pill pill-blue">${r["Assigned To"]}</span>`;
@@ -980,7 +995,7 @@ function rowHtml(r) {
     : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
 
   return `<tr class="${rowClass}">
-    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${nwBadge}</td>
+    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${nwBadge}${cancelBadge}</td>
     <td>${r["Case Number"]}</td>
     <td><span class="pill ${prodCls}">${r["Integration / Product"]}</span></td>
     <td>${r["Account Name"]}</td>
