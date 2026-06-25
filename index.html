@@ -113,11 +113,15 @@
 
   /* ── Stat cards ── */
   .stat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px,1fr)); gap: 10px; margin: 14px 0; }
-  .stat-card { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 12px 14px; }
+  .stat-card { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); padding: 12px 14px; cursor: default; transition: border-color .15s, box-shadow .15s; }
+  .stat-card.clickable { cursor: pointer; }
+  .stat-card.clickable:hover { border-color: var(--brand); box-shadow: 0 2px 8px rgba(0,87,255,.12); }
+  .stat-card.clickable.active { border-color: var(--brand); background: var(--brand-light); }
   .stat-card .lbl { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--gray-400); }
   .stat-card .val { font-size: 26px; font-weight: 800; line-height: 1.1; margin-top: 3px; }
   .stat-card .sub { font-size: 10px; color: var(--gray-400); margin-top: 2px; }
   .stat-card.warn .val { color: var(--red); }
+  .stat-card.warn.clickable.active { border-color: var(--red); background: var(--red-light); }
 
   /* ── Workload ── */
   .workload-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(195px,1fr)); gap: 10px; margin-bottom: 16px; }
@@ -275,15 +279,15 @@
       </div>
     </div>
     <div class="stat-grid" id="stat-grid" style="display:none">
-      <div class="stat-card"><div class="lbl">New Assigned</div><div class="val" id="s-total">0</div><div class="sub">this run</div></div>
-      <div class="stat-card"><div class="lbl">Accounts</div><div class="val" id="s-accounts">0</div><div class="sub">unique</div></div>
-      <div class="stat-card"><div class="lbl">Spanish</div><div class="val" id="s-spanish">0</div><div class="sub">bilingual routed</div></div>
-      <div class="stat-card warn"><div class="lbl">Overdue (New)</div><div class="val" id="s-overdue">0</div><div class="sub">past install date</div></div>
-      <div class="stat-card warn"><div class="lbl">Overdue (Assigned)</div><div class="val" id="s-overdue-assigned">0</div><div class="sub">already in Salesforce</div></div>
-      <div class="stat-card warn"><div class="lbl">Non-Workable</div><div class="val" id="s-nonworkable">0</div><div class="sub">parent case blocked</div></div>
-      <div class="stat-card warn"><div class="lbl">Cancelled</div><div class="val" id="s-cancelled">0</div><div class="sub">parent case cancelled</div></div>
-      <div class="stat-card warn"><div class="lbl">OOO Cases</div><div class="val" id="s-ooo">0</div><div class="sub">need reassignment</div></div>
-      <div class="stat-card"><div class="lbl">Unassigned</div><div class="val" id="s-unassigned">0</div><div class="sub">in queue</div></div>
+      <div class="stat-card clickable" id="sc-new"      onclick="statFilter('new')"><div class="lbl">New Assigned</div><div class="val" id="s-total">0</div><div class="sub">this run</div></div>
+      <div class="stat-card"           id="sc-accounts"                              ><div class="lbl">Accounts</div><div class="val" id="s-accounts">0</div><div class="sub">unique</div></div>
+      <div class="stat-card clickable" id="sc-spanish"  onclick="statFilter('spanish')"><div class="lbl">Spanish</div><div class="val" id="s-spanish">0</div><div class="sub">bilingual routed</div></div>
+      <div class="stat-card warn clickable" id="sc-overdue"  onclick="statFilter('overdue')"><div class="lbl">Overdue (New)</div><div class="val" id="s-overdue">0</div><div class="sub">past install date</div></div>
+      <div class="stat-card warn clickable" id="sc-overdueA" onclick="statFilter('overdueA')"><div class="lbl">Overdue (Assigned)</div><div class="val" id="s-overdue-assigned">0</div><div class="sub">already in Salesforce</div></div>
+      <div class="stat-card warn clickable" id="sc-nw"       onclick="statFilter('nonworkable')"><div class="lbl">Non-Workable</div><div class="val" id="s-nonworkable">0</div><div class="sub">parent case blocked</div></div>
+      <div class="stat-card warn clickable" id="sc-cancelled" onclick="statFilter('cancelled')"><div class="lbl">Cancelled</div><div class="val" id="s-cancelled">0</div><div class="sub">parent case cancelled</div></div>
+      <div class="stat-card warn clickable" id="sc-ooo"      onclick="statFilter('ooo')"><div class="lbl">OOO Cases</div><div class="val" id="s-ooo">0</div><div class="sub">need reassignment</div></div>
+      <div class="stat-card clickable" id="sc-unassigned" onclick="statFilter('unassigned')"><div class="lbl">Unassigned</div><div class="val" id="s-unassigned">0</div><div class="sub">in queue</div></div>
     </div>
   </div>
 
@@ -941,6 +945,103 @@ function autoReassignOoo() {
 }
 
 // ─────────────────────────────────────────────
+// STAT CARD FILTER SHORTCUTS
+// ─────────────────────────────────────────────
+let activeStatFilter = null;
+function statFilter(type) {
+  // Toggle off if same card clicked again
+  if (activeStatFilter === type) {
+    activeStatFilter = null;
+    clearStatFilters();
+    applyFilters();
+    updateStatCardHighlights();
+    return;
+  }
+  activeStatFilter = type;
+  // Reset all dropdowns first
+  clearStatFilters();
+  // Apply the appropriate filter
+  switch(type) {
+    case "new":
+      // New assigned = not _alreadyAssigned and not _unassigned
+      fNonWorkable = "all"; fOwner = "all"; fLang = "all"; fOverdue = "all";
+      // We filter inline by temporarily using a custom flag
+      break;
+    case "spanish":
+      fLang = "spanish";
+      break;
+    case "overdue":
+      fOverdue = "overdue";
+      // also exclude already-assigned
+      break;
+    case "overdueA":
+      fOverdue = "overdue";
+      fOwner   = "all";
+      break;
+    case "nonworkable":
+      fNonWorkable = "nonworkable";
+      break;
+    case "cancelled":
+      fNonWorkable = "cancelled";
+      break;
+    case "ooo":
+      // Scroll to OOO warning banner if visible, otherwise show all
+      const oooEl = document.querySelector(".overdue-banner");
+      if (oooEl) oooEl.scrollIntoView({behavior:"smooth"});
+      activeStatFilter = null;
+      updateStatCardHighlights();
+      return;
+    case "unassigned":
+      fOwner = "— Unassigned —";
+      break;
+  }
+  // Sync dropdowns to match state
+  syncDropdowns();
+  // Custom row filter for "new" case
+  if (type === "new") {
+    filteredRows = lastAssignments.filter(r => !r._alreadyAssigned && !r._unassigned);
+    if (sortCol) sortInPlace();
+    currentPage = 1;
+    const el = document.getElementById("assign-count"); if (el) el.textContent = filteredRows.length;
+    renderTable();
+  } else {
+    applyFilters();
+  }
+  // For overdueA, further narrow to already-assigned after applyFilters
+  if (type === "overdueA") {
+    filteredRows = filteredRows.filter(r => r._overdue && r._alreadyAssigned);
+    if (sortCol) sortInPlace();
+    currentPage = 1;
+    const el = document.getElementById("assign-count"); if (el) el.textContent = filteredRows.length;
+    renderTable();
+  }
+  updateStatCardHighlights();
+  // Scroll to assignments table
+  document.getElementById("assign-tbody")?.closest(".table-wrap")?.scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+function clearStatFilters() {
+  fOwner = "all"; fLang = "all"; fOverdue = "all"; fNonWorkable = "all"; fText = "";
+  const fs = document.getElementById("f-search"); if (fs) fs.value = "";
+}
+
+function syncDropdowns() {
+  const fo = document.getElementById("f-owner");     if (fo) fo.value = fOwner;
+  const fl = document.getElementById("f-lang");      if (fl) fl.value = fLang;
+  const fov = document.getElementById("f-overdue");  if (fov) fov.value = fOverdue;
+  const fn = document.getElementById("f-nonworkable"); if (fn) fn.value = fNonWorkable;
+}
+
+function updateStatCardHighlights() {
+  const map = { new:"sc-new", spanish:"sc-spanish", overdue:"sc-overdue", overdueA:"sc-overdueA",
+                nonworkable:"sc-nw", cancelled:"sc-cancelled", ooo:"sc-ooo", unassigned:"sc-unassigned" };
+  Object.values(map).forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove("active"); });
+  if (activeStatFilter && map[activeStatFilter]) {
+    const el = document.getElementById(map[activeStatFilter]); if (el) el.classList.add("active");
+  }
+}
+
+// ─────────────────────────────────────────────
 // FILTERS + SORT + TABLE
 // ─────────────────────────────────────────────
 function applyFilters() {
@@ -972,6 +1073,9 @@ function applyFilters() {
   if (sortCol) sortInPlace();
   currentPage = 1;
   const el = document.getElementById("assign-count"); if (el) el.textContent = filteredRows.length;
+  // Clear stat card highlight if user manually changed a dropdown
+  activeStatFilter = null;
+  updateStatCardHighlights();
   renderTable();
 }
 
