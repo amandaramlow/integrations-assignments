@@ -157,8 +157,9 @@
   .table-wrap { background: #fff; border: 1px solid var(--gray-200); border-radius: var(--radius); overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; min-width: 1200px; }
   thead th { background: var(--gray-50); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--gray-400); padding: 9px 11px; text-align: left; border-bottom: 1px solid var(--gray-200); white-space: nowrap; cursor: pointer; user-select: none; }
-  thead th:hover { background: var(--gray-100); }
-  thead th.sorted { color: var(--brand); }
+  thead th:hover { background: var(--gray-100); color: var(--gray-700); }
+  thead th.sorted { color: var(--brand); background: var(--brand-light); }
+  thead th .sort-arrow { margin-left: 4px; opacity: .5; font-size: 9px; }
   tbody tr { border-bottom: 1px solid var(--gray-100); transition: background .1s; }
   tbody tr:last-child { border-bottom: none; }
   tbody tr:hover { background: var(--gray-50); }
@@ -360,7 +361,7 @@ let lastAssignments = [], lastWorkload = [], lastOooCases = [], lastUnassigned =
 let uFilterProduct = "all", uFilterText = "";
 let filteredRows = [];
 let sortCol = null, sortAsc = true, currentPage = 1;
-const PAGE_SIZE = 50;
+let PAGE_SIZE = 50;
 let fText = "", fOwner = "all", fProduct = "all", fLang = "all", fOverdue = "all", fNonWorkable = "all";
 let viewMode = "flat"; // "flat" or "installer"
 
@@ -799,24 +800,31 @@ function renderAll() {
 
     <div class="table-wrap">
       <table><thead><tr>
-        <th onclick="sortBy('Assigned To')">Assigned To</th>
-        <th onclick="sortBy('Case Number')">Case #</th>
-        <th onclick="sortBy('Integration / Product')">Product</th>
-        <th onclick="sortBy('Account Name')">Account</th>
-        <th onclick="sortBy('Install Date')">Install Date</th>
-        <th onclick="sortBy('Installer')">Installer</th>
-        <th onclick="sortBy('Status')">Status</th>
-        <th onclick="sortBy('Sub Status')">Sub Status</th>
-        <th onclick="sortBy('Parent Status')">Parent Status</th>
-        <th onclick="sortBy('Parent Backlog Status')">Parent Backlog</th>
-        <th onclick="sortBy('Backlog Sub Status')">Backlog Sub</th>
-        <th onclick="sortBy('Preferred Language')">Language</th>
-        <th>Latest Update</th>
+        <th data-col="Assigned To"           onclick="sortBy(this)">Assigned To<span class="sort-arrow"></span></th>
+        <th data-col="Case Number"           onclick="sortBy(this)">Case #<span class="sort-arrow"></span></th>
+        <th data-col="Integration / Product" onclick="sortBy(this)">Product<span class="sort-arrow"></span></th>
+        <th data-col="Account Name"          onclick="sortBy(this)">Account<span class="sort-arrow"></span></th>
+        <th data-col="Install Date"          onclick="sortBy(this)">Install Date<span class="sort-arrow"></span></th>
+        <th data-col="Installer"             onclick="sortBy(this)">Installer<span class="sort-arrow"></span></th>
+        <th data-col="Status"                onclick="sortBy(this)">Status<span class="sort-arrow"></span></th>
+        <th data-col="Sub Status"            onclick="sortBy(this)">Sub Status<span class="sort-arrow"></span></th>
+        <th data-col="Parent Status"         onclick="sortBy(this)">Parent Status<span class="sort-arrow"></span></th>
+        <th data-col="Parent Backlog Status" onclick="sortBy(this)">Parent Backlog<span class="sort-arrow"></span></th>
+        <th data-col="Backlog Sub Status"    onclick="sortBy(this)">Backlog Sub<span class="sort-arrow"></span></th>
+        <th data-col="Preferred Language"    onclick="sortBy(this)">Language<span class="sort-arrow"></span></th>
+        <th data-col="Latest Comment"        onclick="sortBy(this)">Latest Update<span class="sort-arrow"></span></th>
       </tr></thead>
       <tbody id="assign-tbody"></tbody></table>
       <div class="pagination">
         <span id="page-info"></span>
-        <div class="pg-btns">
+        <div class="pg-btns" style="display:flex;align-items:center;gap:8px">
+          <label style="font-size:11px;color:var(--gray-400)">Show
+            <select id="page-size-sel" onchange="setPageSize(this.value)" style="margin-left:4px;border:1px solid var(--gray-200);border-radius:4px;padding:2px 4px;font-size:11px">
+              <option value="50"  selected>50</option>
+              <option value="100">100</option>
+              <option value="all">All</option>
+            </select>
+          </label>
           <button onclick="changePage(-1)" id="prev-btn">← Prev</button>
           <button onclick="changePage(1)"  id="next-btn">Next →</button>
         </div>
@@ -1079,13 +1087,20 @@ function applyFilters() {
   renderTable();
 }
 
-function sortBy(col) {
+function sortBy(thEl) {
+  const col = thEl.dataset.col;
+  if (!col) return;
   if (sortCol === col) sortAsc = !sortAsc; else { sortCol = col; sortAsc = true; }
-  document.querySelectorAll("thead th").forEach(th => th.classList.remove("sorted"));
-  const cols = ["Assigned To","Case Number","Integration / Product","Account Name","Install Date","Installer","Preferred Language"];
-  const idx = cols.indexOf(col);
-  const ths = document.querySelectorAll("thead th");
-  if (idx >= 0 && ths[idx]) ths[idx].classList.add("sorted");
+  // Update all headers
+  document.querySelectorAll("#assign-tbody").forEach(()=>{});
+  document.querySelectorAll("thead th[data-col]").forEach(th => {
+    th.classList.remove("sorted");
+    const arrow = th.querySelector(".sort-arrow");
+    if (arrow) arrow.textContent = "";
+  });
+  thEl.classList.add("sorted");
+  const arrow = thEl.querySelector(".sort-arrow");
+  if (arrow) arrow.textContent = sortAsc ? " ↑" : " ↓";
   sortInPlace(); renderTable();
 }
 function sortInPlace() {
@@ -1115,10 +1130,12 @@ function renderTable() {
   } else {
     tbody.innerHTML = page.map(r => rowHtml(r)).join("");
   }
-  const total = filteredRows.length, totalPages = Math.ceil(total/PAGE_SIZE)||1;
-  document.getElementById("page-info").textContent = `${start+1}–${Math.min(start+PAGE_SIZE,total)} of ${total}`;
-  document.getElementById("prev-btn").disabled = currentPage <= 1;
-  document.getElementById("next-btn").disabled = currentPage >= totalPages;
+  const total = filteredRows.length;
+  const isAll = PAGE_SIZE === Infinity;
+  const totalPages = isAll ? 1 : (Math.ceil(total/PAGE_SIZE)||1);
+  document.getElementById("page-info").textContent = isAll ? `All ${total} cases` : `${start+1}–${Math.min(start+PAGE_SIZE,total)} of ${total}`;
+  document.getElementById("prev-btn").disabled = isAll || currentPage <= 1;
+  document.getElementById("next-btn").disabled = isAll || currentPage >= totalPages;
 }
 
 function rowHtml(r) {
@@ -1179,7 +1196,14 @@ function renderInstallerView(tbody, rows) {
   }).join("") || `<tr><td colspan="7" class="no-data">No cases match the current filters.</td></tr>`;
 }
 
+function setPageSize(val) {
+  PAGE_SIZE = val === "all" ? Infinity : parseInt(val);
+  currentPage = 1;
+  renderTable();
+}
+
 function changePage(dir) {
+  if (PAGE_SIZE === Infinity) return;
   const totalPages = Math.ceil(filteredRows.length/PAGE_SIZE)||1;
   currentPage = Math.max(1, Math.min(totalPages, currentPage+dir));
   renderTable();
