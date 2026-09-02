@@ -55,9 +55,10 @@
   .mbadge-ooo { background: var(--red-light); color: var(--red); }
   .mbadge-res { background: var(--orange-light); color: var(--orange); }
   .mbadge-bil { background: var(--green-light); color: var(--green); }
+  .mbadge-vip { background: var(--purple-light); color: var(--purple); }
 
   /* ── Toggle switches ── */
-  .toggle-group { display: flex; gap: 5px; flex-shrink: 0; }
+  .toggle-group { display: flex; gap: 4px; flex-shrink: 0; }
   .toggle-item { display: flex; flex-direction: column; align-items: center; gap: 1px; }
   .toggle-item label.lbl { font-size: 8px; color: var(--gray-400); font-weight: 700; text-transform: uppercase; }
   .toggle { position: relative; width: 26px; height: 14px; cursor: pointer; }
@@ -68,6 +69,7 @@
   .t-ooo input:checked + .knob     { background: var(--red); }
   .t-res input:checked + .knob     { background: var(--orange); }
   .t-bil input:checked + .knob     { background: var(--green); }
+  .t-vip input:checked + .knob     { background: var(--purple); }
 
   .add-person { display: flex; gap: 5px; margin-top: 8px; }
   .add-person input { flex: 1; border: 1px solid var(--gray-200); border-radius: 6px; padding: 5px 8px; font-size: 11px; }
@@ -122,6 +124,16 @@
   .stat-card .sub { font-size: 10px; color: var(--gray-400); margin-top: 2px; }
   .stat-card.warn .val { color: var(--red); }
   .stat-card.warn.clickable.active { border-color: var(--red); background: var(--red-light); }
+  .stat-card.prio { border-color: var(--orange); }
+  .stat-card.prio .val { color: var(--orange); }
+  .stat-card.prio.clickable:hover { border-color: var(--orange); box-shadow: 0 2px 8px rgba(255,107,53,.18); }
+  .stat-card.prio.clickable.active { border-color: var(--orange); background: var(--orange-light); }
+
+  /* ── Add-on / priority row highlight ── */
+  tbody tr.addon-row { background: #fff6f1; box-shadow: inset 3px 0 0 var(--orange); }
+  tbody tr.addon-row:hover { background: #ffeee5; }
+  tbody tr.review-row { background: #fdf4f4; box-shadow: inset 3px 0 0 var(--red); }
+  tbody tr.review-row:hover { background: #fbeaea; }
 
   /* ── Workload ── */
   .workload-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(195px,1fr)); gap: 10px; margin-bottom: 16px; }
@@ -256,6 +268,7 @@
     <div class="legend-row"><span class="mbadge mbadge-ooo">OOO</span> Excluded from run</div>
     <div class="legend-row"><span class="mbadge mbadge-res">Res</span> ~50% fewer cases</div>
     <div class="legend-row"><span class="mbadge mbadge-bil">Bil</span> Takes Spanish cases</div>
+    <div class="legend-row"><span class="mbadge mbadge-vip">VIP</span> Handles Segment A &amp; Premier</div>
     <div class="legend-row" style="margin-top:6px">
       <span style="display:inline-block;width:10px;height:10px;background:var(--gray-200);border-radius:2px;margin-right:2px"></span> Existing cases
     </div>
@@ -263,6 +276,10 @@
       <span style="display:inline-block;width:10px;height:10px;background:var(--brand);border-radius:2px;margin-right:2px"></span> New assignments
     </div>
     <div class="legend-row"><span class="pill pill-red" style="font-size:9px">Overdue</span> Past install date</div>
+    <div class="legend-row" style="margin-top:6px"><span class="pill pill-orange" style="font-size:9px">⚡ Add-On</span> Dashboard tile order</div>
+    <div class="legend-row"><span class="pill pill-yellow" style="font-size:9px">⚡ Add-On?</span> Likely add-on</div>
+    <div class="legend-row"><span class="pill pill-teal" style="font-size:9px">Processing</span> Account already in flight</div>
+    <div class="legend-row"><span class="pill pill-red" style="font-size:9px">⚠ Review</span> No SKU — not assigned</div>
   </div>
 </aside>
 
@@ -281,8 +298,11 @@
     </div>
     <div class="stat-grid" id="stat-grid" style="display:none">
       <div class="stat-card clickable" id="sc-new"      onclick="statFilter('new')"><div class="lbl">New Assigned</div><div class="val" id="s-total">0</div><div class="sub">this run</div></div>
+      <div class="stat-card prio clickable" id="sc-addon" onclick="statFilter('addon')"><div class="lbl">⚡ Add-Ons</div><div class="val" id="s-addon">0</div><div class="sub">top priority</div></div>
+      <div class="stat-card warn clickable" id="sc-review" onclick="statFilter('review')"><div class="lbl">Needs Review</div><div class="val" id="s-review">0</div><div class="sub">not auto-assigned</div></div>
       <div class="stat-card"           id="sc-accounts"                              ><div class="lbl">Accounts</div><div class="val" id="s-accounts">0</div><div class="sub">unique</div></div>
       <div class="stat-card clickable" id="sc-spanish"  onclick="statFilter('spanish')"><div class="lbl">Spanish</div><div class="val" id="s-spanish">0</div><div class="sub">bilingual routed</div></div>
+      <div class="stat-card clickable" id="sc-vip"      onclick="statFilter('vip')"><div class="lbl">VIP / A</div><div class="val" id="s-vip">0</div><div class="sub">Segment A + Premier</div></div>
       <div class="stat-card warn clickable" id="sc-overdue"  onclick="statFilter('overdue')"><div class="lbl">Overdue (New)</div><div class="val" id="s-overdue">0</div><div class="sub">past install date</div></div>
       <div class="stat-card warn clickable" id="sc-overdueA" onclick="statFilter('overdueA')"><div class="lbl">Overdue (Assigned)</div><div class="val" id="s-overdue-assigned">0</div><div class="sub">already in Salesforce</div></div>
       <div class="stat-card warn clickable" id="sc-nw"       onclick="statFilter('nonworkable')"><div class="lbl">Non-Workable</div><div class="val" id="s-nonworkable">0</div><div class="sub">parent case blocked</div></div>
@@ -326,19 +346,115 @@ const COL = {
   PARENT_STATUS:    "Case : Parent Case : Status",
   PARENT_BACKLOG:   "Case : Parent Case : Backlog Status",
   BACKLOG_SUB:      "Backlog Sub Status",
+  SEGMENT:          "Account Name: Segment",
+  CREATED_BY:       "Created By",
+  SUBJECT:          "Subject",
+  LAST_PROCESSING:  "Case : Account Name : Last Processing Date",
 };
+
+// ─────────────────────────────────────────────
+// CASE CLASSIFICATION (add-ons vs new installs vs review)
+// ─────────────────────────────────────────────
+// Created-by signals:
+//   • SpotOn Marketplace Service API Ordering → the client clicked a tile in
+//     Dashboard. Confirmed add-on: account is already live, no installer visit.
+//   • GPV Integration User → the integration was on the quote and has a case
+//     going through implementation. NOT an add-on; wait for an install date.
+//   • System / Talkdesk → email-to-case and support intake (replies, voicemails,
+//     partnership intros). Never an activation we own.
+//   • A person → ambiguous. Could be a real add-on, a reply, or a transfer.
+// Subject signal:
+//   • Contains "Integrations Activations" → we have SKUs for it.
+//   • Doesn't → add-on, reply, or transferred case. Always flagged for review.
+const CREATOR_MARKETPLACE = "spoton marketplace service api ordering";
+const CREATOR_GPV         = "gpv integration user";
+const CREATOR_INTAKE      = new Set(["system", "talkdesk integration"]);
+
+const T_ADDON_CONFIRMED = "Add-On";
+const T_ADDON_LIKELY    = "Add-On?";
+const T_NEW_INSTALL     = "New Install";
+const T_STANDARD        = "Standard";
+const T_REVIEW          = "Review";
+
+function hasActivationSubject(s) {
+  return String(s||"").toLowerCase().includes("integrations activations");
+}
+
+// processingAccounts = accounts we already know are in flight (see runAssignments)
+function classifyCase(r, processingAccounts) {
+  const cb      = String(r[COL.CREATED_BY]||"").trim().toLowerCase();
+  const subjIA  = hasActivationSubject(r[COL.SUBJECT]);
+  const account = String(r[COL.ACCOUNT]||"").trim();
+  const hasLPD  = !!String(r[COL.LAST_PROCESSING]||"").trim();
+  const processing = hasLPD || (processingAccounts && processingAccounts.has(account));
+
+  // Subject without "Integrations Activations" is always a review case —
+  // these are the replies, transfers and support tickets, and we have no SKU.
+  if (!subjIA) {
+    const why = CREATOR_INTAKE.has(cb)
+      ? "Email/support intake — no activation subject"
+      : (cb === CREATOR_MARKETPLACE || cb === CREATOR_GPV)
+        ? "No activation subject"
+        : "Person-created with no activation subject — possible add-on, reply or transfer";
+    return { type: T_REVIEW, reason: why, isAddOn: false, needsReview: true, processing };
+  }
+
+  if (CREATOR_INTAKE.has(cb)) {
+    return { type: T_REVIEW, reason: "Created by " + String(r[COL.CREATED_BY]||"").trim() + " — support/email intake, not an activation we own",
+             isAddOn: false, needsReview: true, processing };
+  }
+
+  if (cb === CREATOR_MARKETPLACE) {
+    return { type: T_ADDON_CONFIRMED, reason: "Ordered from a Dashboard tile by the client",
+             isAddOn: true, needsReview: false, processing };
+  }
+
+  if (cb === CREATOR_GPV) {
+    return { type: T_NEW_INSTALL, reason: "On the quote — going through implementation",
+             isAddOn: false, needsReview: false, processing };
+  }
+
+  // A person created it, with a proper activation subject.
+  if (processing) {
+    return { type: T_ADDON_LIKELY, reason: "Person-created on an account already processing",
+             isAddOn: true, needsReview: false, processing };
+  }
+  return { type: T_STANDARD, reason: "Person-created activation on a new account",
+           isAddOn: false, needsReview: false, processing };
+}
+
+function typePillClass(t) {
+  if (t === T_ADDON_CONFIRMED) return "pill-orange";
+  if (t === T_ADDON_LIKELY)    return "pill-yellow";
+  if (t === T_REVIEW)          return "pill-red";
+  if (t === T_NEW_INSTALL)     return "pill-blue";
+  return "pill-gray";
+}
 const DEFAULT_TEAM = [
-  { name:"Amber McWherter",  ooo:false, reserve:false, bilingual:false },
-  { name:"Anna Machuca",     ooo:false, reserve:false, bilingual:false },
-  { name:"Gisela Villa",     ooo:false, reserve:false, bilingual:false },
-  { name:"Raul Juarez",      ooo:false, reserve:false, bilingual:false },
-  { name:"Jonathan Cedillo", ooo:false, reserve:false, bilingual:false },
-  { name:"Diana Aguilar",    ooo:false, reserve:false, bilingual:false },
-  { name:"Andres Aguilar",   ooo:false, reserve:false, bilingual:false },
-  { name:"Cristhian Anaya",  ooo:false, reserve:false, bilingual:false },
-  { name:"Enrique Mendoza",  ooo:false, reserve:false, bilingual:false },
-  { name:"Uriel Hernandez",  ooo:false, reserve:false, bilingual:false },
+  { name:"Amber McWherter",  ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Anna Machuca",     ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Gisela Villa",     ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Raul Juarez",      ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Jonathan Cedillo", ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Diana Aguilar",    ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Andres Aguilar",   ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Cristhian Anaya",  ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Enrique Mendoza",  ooo:false, reserve:false, bilingual:false, vip:false },
+  { name:"Uriel Hernandez",  ooo:false, reserve:false, bilingual:false, vip:false },
 ];
+
+// ── Segment / VIP helpers ──
+// "VIP/A" = the accounts that must get a senior specialist: Segment A + Premier.
+function isVipSegment(s) {
+  const v = String(s||"").trim().toLowerCase();
+  return v === "premier" || v === "segment a" || v === "a";
+}
+function segPillClass(s) {
+  const v = String(s||"").trim().toLowerCase();
+  if (v === "premier")   return "pill-purple";
+  if (v === "segment a" || v === "a") return "pill-teal";
+  return "pill-gray";
+}
 
 // Product → color class
 function productClass(prod) {
@@ -362,11 +478,24 @@ let uFilterProduct = "all", uFilterText = "";
 let filteredRows = [];
 let sortCol = null, sortAsc = true, currentPage = 1;
 let PAGE_SIZE = 50;
-let fText = "", fOwner = "all", fProduct = "all", fLang = "all", fOverdue = "all", fNonWorkable = "all";
+let fText = "", fOwner = "all", fProduct = "all", fLang = "all", fOverdue = "all", fNonWorkable = "all", fSegment = "all", fType = "all";
 let viewMode = "flat"; // "flat" or "installer"
 
 function loadTeam() {
-  try { const s = localStorage.getItem("intg_team_v3"); if (s) return JSON.parse(s); } catch(e){}
+  try {
+    const s = localStorage.getItem("intg_team_v3");
+    if (s) {
+      const arr = JSON.parse(s);
+      // Migration: older saves predate the VIP/A flag
+      arr.forEach(p => {
+        if (typeof p.vip       !== "boolean") p.vip       = false;
+        if (typeof p.ooo       !== "boolean") p.ooo       = false;
+        if (typeof p.reserve   !== "boolean") p.reserve   = false;
+        if (typeof p.bilingual !== "boolean") p.bilingual = false;
+      });
+      return arr;
+    }
+  } catch(e){}
   return JSON.parse(JSON.stringify(DEFAULT_TEAM));
 }
 function saveTeam() { localStorage.setItem("intg_team_v3", JSON.stringify(team)); }
@@ -408,6 +537,7 @@ function renderTeam() {
         ${p.ooo      ? '<span class="mbadge mbadge-ooo">OOO</span>' : ''}
         ${p.reserve  ? '<span class="mbadge mbadge-res">Res</span>' : ''}
         ${p.bilingual? '<span class="mbadge mbadge-bil">Bil</span>' : ''}
+        ${p.vip      ? '<span class="mbadge mbadge-vip">VIP</span>' : ''}
       </div>
       <div class="toggle-group">
         <div class="toggle-item"><label class="lbl">OOO</label>
@@ -416,6 +546,8 @@ function renderTeam() {
           <label class="toggle t-res"><input type="checkbox" ${p.reserve?"checked":""} onchange="toggle(${i},'reserve',this.checked)"><span class="knob"></span></label></div>
         <div class="toggle-item"><label class="lbl">Bil</label>
           <label class="toggle t-bil"><input type="checkbox" ${p.bilingual?"checked":""} onchange="toggle(${i},'bilingual',this.checked)"><span class="knob"></span></label></div>
+        <div class="toggle-item" title="VIP/A — handles Segment A &amp; Premier accounts"><label class="lbl">VIP</label>
+          <label class="toggle t-vip"><input type="checkbox" ${p.vip?"checked":""} onchange="toggle(${i},'vip',this.checked)"><span class="knob"></span></label></div>
       </div>`;
     list.appendChild(row);
   });
@@ -426,7 +558,7 @@ function addPerson() {
   const name = inp.value.trim();
   if (!name) return;
   if (team.some(p => p.name.toLowerCase() === name.toLowerCase())) { alert("Already on team."); return; }
-  team.push({name, ooo:false, reserve:false, bilingual:false});
+  team.push({name, ooo:false, reserve:false, bilingual:false, vip:false});
   saveTeam(); renderTeam(); inp.value = "";
 }
 
@@ -482,20 +614,51 @@ function parseReport(buffer) {
     rows.push(obj);
   }
 
-  // Forward-fill Account Name
-  let lastAcct = "";
+  // Forward-fill Account Name and Segment.
+  // The Salesforce report groups by account, so both are only populated on the
+  // first row of each group. Segment is carried until a NEW account name appears.
+  const blank = v => { const s = String(v||"").trim(); return !s || s === "None" || s.toLowerCase() === "nan"; };
+  let lastAcct = "", lastSeg = "";
   rows.forEach(r => {
     const a = r[COL.ACCOUNT]||"";
-    if (a && a !== "None" && a.toLowerCase() !== "nan") lastAcct = a;
-    else r[COL.ACCOUNT] = lastAcct;
+    if (!blank(a)) {
+      lastAcct = a;
+      lastSeg  = blank(r[COL.SEGMENT]) ? "" : String(r[COL.SEGMENT]).trim();
+    } else {
+      r[COL.ACCOUNT] = lastAcct;
+    }
+    r[COL.SEGMENT] = lastSeg;
   });
 
-  return rows.filter(r => {
+  // Keep every row that has a real case number. A blank Product Name is a
+  // report-grouping artifact, not a reason to discard the case — dropping those
+  // rows used to lose the email/support cases AND a batch of real unassigned
+  // activation cases outright. Where Product Name is empty we recover the
+  // product from the subject line ("Integrations Activations - DoorDash …").
+  const out = [];
+  rows.forEach(r => {
     const cn = String(r[COL.CASE_NUM]||"").trim();
-    if (!/^\d{5,}/.test(cn)) return false;
-    const pr = String(r[COL.PRODUCT]||"").toLowerCase().trim();
-    return !["subtotal","nan","none",""].includes(pr);
+    if (!/^\d{5,}/.test(cn)) return;                     // header/subtotal/count artifacts
+    const pr = String(r[COL.PRODUCT]||"").trim();
+    if (pr.toLowerCase() === "subtotal") return;         // report artifact
+    if (!pr || ["nan","none"].includes(pr.toLowerCase())) {
+      const derived = productFromSubject(r[COL.SUBJECT]);
+      r[COL.PRODUCT]   = derived || "(no product listed)";
+      r._productDerived = true;
+    }
+    out.push(r);
   });
+  return out;
+}
+
+// Salesforce leaves Product Name blank on some rows even though the subject
+// names the integration. Pull it back out: everything between
+// "Integrations Activations -" and the next " - " (which is the account).
+function productFromSubject(subject) {
+  const s = String(subject||"").trim();
+  const m = s.match(/integrations?\s+activations?\s*[-–:]\s*(.+)$/i);
+  if (!m) return "";
+  return m[1].split(/\s+[-–]\s+/)[0].trim();
 }
 
 // ─────────────────────────────────────────────
@@ -548,16 +711,15 @@ function runAssignments() {
 
   const specNames   = active.map(p => p.name);
   const bilingualSet = new Set(active.filter(p => p.bilingual).map(p => p.name));
+  const vipSet       = new Set(active.filter(p => p.vip).map(p => p.name));
   const weightMap   = {}; active.forEach(p => { weightMap[p.name] = p.reserve ? 0.5 : 1.0; });
 
-  // Split report
-  const toAssign = [], alreadyDone = [], oooCases = [];
+  // ── Pass 1: split owned vs unassigned ──
+  const toAssign = [], alreadyDone = [], oooCases = [], unassignedPool = [];
 
   reportRows.forEach(r => {
     const owner = String(r[COL.OWNER]||"").trim().replace(/^\[|\]$/g,"").toLowerCase();
-    const inst  = String(r[COL.INSTALL_DATE]||"").trim();
     const isUnassigned = UNASSIGNED.has(owner) || !owner;
-    const hasInstall   = inst && inst !== "nan" && inst !== "None" && inst !== "";
 
     if (!isUnassigned) {
       const matchedOoo = matchOwner(r[COL.OWNER], oooMembers);
@@ -565,9 +727,37 @@ function runAssignments() {
       const matchedDep = matchOwner(r[COL.OWNER], departed);
       if (matchedDep) { oooCases.push({...r, _oooOwner: matchedDep, _flagReason: "Departed"}); return; }
       alreadyDone.push(r);
-    } else if (hasInstall) {
-      toAssign.push(r);
+    } else {
+      unassignedPool.push(r);
     }
+  });
+
+  // ── Pass 2: which accounts are already in flight? ──
+  // Either Salesforce stamped a Last Processing Date, or the account already has
+  // a case sitting with a specialist in this same report.
+  const processingAccounts = new Set();
+  reportRows.forEach(r => {
+    const acct = String(r[COL.ACCOUNT]||"").trim();
+    if (acct && String(r[COL.LAST_PROCESSING]||"").trim()) processingAccounts.add(acct);
+  });
+  [...alreadyDone, ...oooCases].forEach(r => {
+    const acct = String(r[COL.ACCOUNT]||"").trim();
+    if (acct) processingAccounts.add(acct);
+  });
+
+  // ── Pass 3: classify, then decide what is assignable ──
+  // Add-ons skip the install-date gate entirely — a Dashboard tile order has no
+  // installer visit, so waiting for an install date would strand it forever.
+  // Review cases are never auto-assigned.
+  const reviewCases = [];
+  reportRows.forEach(r => { r._cls = classifyCase(r, processingAccounts); });
+
+  unassignedPool.forEach(r => {
+    const inst = String(r[COL.INSTALL_DATE]||"").trim();
+    const hasInstall = inst && inst !== "nan" && inst !== "None" && inst !== "";
+    const cls = r._cls;
+    if (cls.needsReview)            { reviewCases.push(r); return; }
+    if (cls.isAddOn || hasInstall)  { toAssign.push(r); }
   });
 
   // Existing workload
@@ -580,11 +770,19 @@ function runAssignments() {
   const newCounts = {}; specNames.forEach(n => newCounts[n] = 0);
 
   const effLoad = n => ((existingCounts[n]||0) + (newCounts[n]||0)) / (weightMap[n]||1);
-  const pick = (bilOnly) => {
+  // VIP narrowing is applied FIRST, so for a Segment A / Premier case seniority
+  // outranks language — we then look for a bilingual person inside the VIP pool,
+  // and if there isn't one we keep the VIP pool and flag the case for review.
+  const pick = (bilOnly, vipOnly) => {
     let cands = [...specNames];
-    if (bilOnly && bilingualSet.size > 0) { const b = cands.filter(n => bilingualSet.has(n)); if (b.length) cands = b; }
+    if (vipOnly) { const v = cands.filter(n => vipSet.has(n)); if (v.length) cands = v; }
+    if (bilOnly) { const b = cands.filter(n => bilingualSet.has(n)); if (b.length) cands = b; }
     return cands.reduce((a,b) => effLoad(a) <= effLoad(b) ? a : b);
   };
+
+  // Installer-day grouping is keyed by segment class so the segment rule wins:
+  // a VIP account and a standard account on the same installer/day get split.
+  const instKey = (inst, date, isVip) => inst + "|" + date + "|" + (isVip ? "VIP" : "STD");
 
   // Seed from already-assigned
   const accountToSpec = {}, instdayToSpec = {};
@@ -592,31 +790,56 @@ function runAssignments() {
     const acct = String(r[COL.ACCOUNT]||"").trim();
     const inst  = String(r[COL.INSTALLER]||"").trim();
     const date  = String(r[COL.INSTALL_DATE]||"").trim();
+    const vipR  = isVipSegment(r[COL.SEGMENT]);
     const m = matchOwner(r[COL.OWNER], specNames);
     if (!m) return;
     if (acct && acct !== "nan") accountToSpec[acct] = accountToSpec[acct] || m;
-    if (inst && inst !== "nan" && date && date !== "nan") instdayToSpec[inst+"|"+date] = instdayToSpec[inst+"|"+date] || m;
+    if (inst && inst !== "nan" && date && date !== "nan") {
+      const k = instKey(inst, date, vipR);
+      instdayToSpec[k] = instdayToSpec[k] || m;
+    }
   });
 
-  // Assign
+  // Assign — add-ons go first (they are the highest priority and must move
+  // fast), then VIP/A, so both get first call on capacity before the general
+  // rotation fills everyone's queue.
   const assignments = [];
-  toAssign.forEach(r => {
+  const prio = r => (r._cls && r._cls.isAddOn ? 2 : 0) + (isVipSegment(r[COL.SEGMENT]) ? 1 : 0);
+  const ordered = [...toAssign].sort((a,b) => prio(b) - prio(a));
+
+  ordered.forEach(r => {
     const account  = String(r[COL.ACCOUNT]||"").trim();
     const inst     = String(r[COL.INSTALLER]||"").trim();
     const date     = String(r[COL.INSTALL_DATE]||"").trim();
     const lang     = String(r[COL.PREF_LANG]||"").trim().toLowerCase();
     const needsBil = ["spanish","español","es"].includes(lang);
     const overdue  = isOverdue(date);
+    const segment  = String(r[COL.SEGMENT]||"").trim();
+    const isVip    = isVipSegment(segment);
+    const cls      = r._cls || classifyCase(r, processingAccounts);
+    const isAddOn  = cls.isAddOn;
+    const k        = instKey(inst, date, isVip);
 
     let assigned = accountToSpec[account] || null;
-    if (!assigned && inst && inst !== "nan") assigned = instdayToSpec[inst+"|"+date] || null;
+    const inherited = assigned;          // the specialist already on this account
+    if (!assigned && inst && inst !== "nan") assigned = instdayToSpec[k] || null;
     if (assigned && !specNames.includes(assigned)) assigned = null;
+    // A Segment A / Premier case may never sit with a non-VIP specialist
+    // (unless nobody is flagged VIP at all — then we fall back and flag it).
+    if (assigned && isVip && vipSet.size > 0 && !vipSet.has(assigned)) assigned = null;
     if (assigned && needsBil && !bilingualSet.has(assigned)) assigned = null;
-    if (!assigned) assigned = pick(needsBil);
+    if (!assigned) assigned = pick(needsBil, isVip);
+
+    // Review flags: constraints we could not fully satisfy
+    const vipUnmet  = isVip    && !vipSet.has(assigned);
+    const langUnmet = needsBil && !bilingualSet.has(assigned);
+    // The account had an owner but a hard rule pulled the case away from them,
+    // so this account is now split across two specialists — worth a look.
+    const continuityBroken = !!inherited && inherited !== assigned;
 
     newCounts[assigned]++;
     if (account && account !== "nan") accountToSpec[account] = accountToSpec[account] || assigned;
-    if (inst && inst !== "nan") instdayToSpec[inst+"|"+date] = instdayToSpec[inst+"|"+date] || assigned;
+    if (inst && inst !== "nan") instdayToSpec[k] = instdayToSpec[k] || assigned;
 
     const parentBacklog = String(r[COL.PARENT_BACKLOG]||"").trim();
     assignments.push({
@@ -624,6 +847,10 @@ function runAssignments() {
       "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
       "Integration / Product":    String(r[COL.PRODUCT]||"").trim(),
       "Account Name":             account,
+      "Segment":                  segment,
+      "Case Type":                cls.type,
+      "Created By":               String(r[COL.CREATED_BY]||"").trim(),
+      "Account Processing":       cls.processing ? "Yes" : "",
       "Install Date":             date,
       "Preferred Language":       String(r[COL.PREF_LANG]||"").trim(),
       "Installer":                inst,
@@ -635,18 +862,32 @@ function runAssignments() {
       "Latest Comment":           String(r[COL.LATEST_COMMENT]||"").trim(),
       "Last Processing Date":     today,
       "_overdue":                 overdue,
+      "_vip":                     isVip,
+      "_vipUnmet":                vipUnmet,
+      "_langUnmet":               langUnmet,
+      "_addOn":                   isAddOn,
+      "_type":                    cls.type,
+      "_typeReason":              cls.reason,
+      "_productDerived":          !!r._productDerived,
+      "_processing":              cls.processing,
+      "_needsReview":             false,
+      "_noInstallDate":           !date || date === "nan" || date === "None",
+      "_continuityBroken":        continuityBroken,
       "_nonWorkable":             isNonWorkableFn(parentBacklog),
       "_cancelled":               isCancelledFn(String(r[COL.PARENT_STATUS]||"")),
     });
   });
 
   const workload = active.map(p => ({
-    name: p.name, reserve: p.reserve, bilingual: p.bilingual,
+    name: p.name, reserve: p.reserve, bilingual: p.bilingual, vip: p.vip,
     existing: existingCounts[p.name]||0, newAssigned: newCounts[p.name]||0,
     total: (existingCounts[p.name]||0)+(newCounts[p.name]||0),
+    vipNew:   assignments.filter(a => a["Assigned To"] === p.name && a._vip).length,
+    addOnNew: assignments.filter(a => a["Assigned To"] === p.name && a._addOn).length,
   }));
 
-  // Collect already-assigned cases that need attention (overdue, non-workable, or cancelled parent)
+  // Collect already-assigned cases that need attention (overdue, non-workable,
+  // cancelled parent, an add-on, or a review case sitting with an owner)
   const flaggedAssigned = [];
   alreadyDone.forEach(r => {
     const date          = String(r[COL.INSTALL_DATE]||"").trim();
@@ -655,12 +896,17 @@ function runAssignments() {
     const overdue       = isOverdue(date);
     const nonWorkable   = isNonWorkableFn(parentBacklog);
     const cancelled     = isCancelledFn(parentStatus);
-    if (!overdue && !nonWorkable && !cancelled) return;
+    const clsA          = r._cls || classifyCase(r, processingAccounts);
+    if (!overdue && !nonWorkable && !cancelled && !clsA.isAddOn && !clsA.needsReview) return;
     flaggedAssigned.push({
       "Assigned To":              String(r[COL.OWNER]||"").trim(),
       "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
       "Integration / Product":    String(r[COL.PRODUCT]||"").trim(),
       "Account Name":             String(r[COL.ACCOUNT]||"").trim(),
+      "Segment":                  String(r[COL.SEGMENT]||"").trim(),
+      "Case Type":                clsA.type,
+      "Created By":               String(r[COL.CREATED_BY]||"").trim(),
+      "Account Processing":       clsA.processing ? "Yes" : "",
       "Install Date":             date,
       "Preferred Language":       String(r[COL.PREF_LANG]||"").trim(),
       "Installer":                String(r[COL.INSTALLER]||"").trim(),
@@ -672,6 +918,14 @@ function runAssignments() {
       "Latest Comment":           String(r[COL.LATEST_COMMENT]||"").trim(),
       "Last Processing Date":     today,
       "_overdue":                 overdue,
+      "_vip":                     isVipSegment(r[COL.SEGMENT]),
+      "_addOn":                   clsA.isAddOn,
+      "_type":                    clsA.type,
+      "_typeReason":              clsA.reason,
+      "_productDerived":          !!r._productDerived,
+      "_processing":              clsA.processing,
+      "_needsReview":             clsA.needsReview,
+      "_noInstallDate":           !date || date === "nan" || date === "None",
       "_alreadyAssigned":         true,
       "_nonWorkable":             nonWorkable,
       "_cancelled":               cancelled,
@@ -691,11 +945,16 @@ function runAssignments() {
       const pb = String(r[COL.PARENT_BACKLOG]||"").trim();
       const ps = String(r[COL.PARENT_STATUS]||"").trim();
       const hasInstall = inst && inst !== "nan" && inst !== "None";
+      const clsU = r._cls || classifyCase(r, processingAccounts);
       unassigned.push({
-        "Assigned To":           "— Unassigned —",
+        "Assigned To":           clsU.needsReview ? "— Needs Review —" : "— Unassigned —",
         "Case Number":           caseNum,
         "Integration / Product": String(r[COL.PRODUCT]||"").trim(),
         "Account Name":          String(r[COL.ACCOUNT]||"").trim(),
+        "Segment":               String(r[COL.SEGMENT]||"").trim(),
+        "Case Type":             clsU.type,
+        "Created By":            String(r[COL.CREATED_BY]||"").trim(),
+        "Account Processing":    clsU.processing ? "Yes" : "",
         "Install Date":          hasInstall ? inst : "",
         "Preferred Language":    String(r[COL.PREF_LANG]||"").trim(),
         "Installer":             String(r[COL.INSTALLER]||"").trim(),
@@ -707,6 +966,15 @@ function runAssignments() {
         "Latest Comment":        String(r[COL.LATEST_COMMENT]||"").trim(),
         "Last Processing Date":  "",
         "_unassigned":           true,
+        "_vip":                  isVipSegment(r[COL.SEGMENT]),
+        "_addOn":                clsU.isAddOn,
+        "_type":                 clsU.type,
+        "_typeReason":           clsU.reason,
+        "_productDerived":       !!r._productDerived,
+        "_processing":           clsU.processing,
+        "_needsReview":          clsU.needsReview,
+        "_noInstallDate":        !hasInstall,
+        "_awaitingInstall":      !hasInstall && !clsU.needsReview && !clsU.isAddOn,
         "_nonWorkable":          isNonWorkableFn(pb),
         "_cancelled":            isCancelledFn(ps),
       });
@@ -724,6 +992,9 @@ function runAssignments() {
   document.getElementById("s-total").textContent     = assignments.length;
   document.getElementById("s-accounts").textContent  = new Set(assignments.map(a=>a["Account Name"])).size;
   document.getElementById("s-spanish").textContent   = assignments.filter(a=>["spanish","español","es"].includes(a["Preferred Language"].toLowerCase())).length;
+  document.getElementById("s-vip").textContent       = assignments.filter(a=>a._vip).length;
+  document.getElementById("s-addon").textContent     = lastAssignments.filter(a=>a._addOn).length;
+  document.getElementById("s-review").textContent    = lastAssignments.filter(a=>a._needsReview).length;
   document.getElementById("s-overdue-assigned").textContent = lastAssignments.filter(a => a._overdue && a._alreadyAssigned).length;
   document.getElementById("s-nonworkable").textContent = lastAssignments.filter(a => a._nonWorkable).length;
   document.getElementById("s-cancelled").textContent   = lastAssignments.filter(a => a._cancelled).length;
@@ -743,11 +1014,15 @@ function renderAll() {
   const scroll = document.getElementById("main-scroll");
   const owners   = [...new Set(lastAssignments.map(a=>a["Assigned To"]).filter(o=>o && o!=="— Unassigned —"))].sort();
   const products = [...new Set(lastAssignments.map(a=>a["Integration / Product"]).filter(Boolean))].sort();
+  const segments = [...new Set(lastAssignments.map(a=>a["Segment"]).filter(Boolean))].sort();
 
   const overdueCount = lastAssignments.filter(a=>a._overdue).length;
 
   scroll.innerHTML = `
+    ${renderAddOnBanner()}
     ${lastOooCases.length ? renderOooWarning() : ""}
+    ${renderReviewBanner()}
+    ${renderVipReviewBanner()}
     ${overdueCount > 0 ? `
     <div class="overdue-banner">
       <h3>⚠ ${overdueCount} case${overdueCount>1?"s":""} with a past install date</h3>
@@ -779,6 +1054,21 @@ function renderAll() {
         <option value="all">All products</option>
         ${products.map(p=>`<option value="${p}" ${fProduct===p?"selected":""}>${p}</option>`).join("")}
       </select>
+      <select id="f-type" onchange="applyFilters()">
+        <option value="all">All case types</option>
+        <option value="addon"    ${fType==="addon"?"selected":""}>⚡ Add-ons (confirmed + likely)</option>
+        <option value="Add-On"   ${fType==="Add-On"?"selected":""}>⚡ Add-On — confirmed (tile order)</option>
+        <option value="Add-On?"  ${fType==="Add-On?"?"selected":""}>⚡ Add-On? — likely</option>
+        <option value="Review"   ${fType==="Review"?"selected":""}>⚠ Needs review</option>
+        <option value="New Install" ${fType==="New Install"?"selected":""}>New Install (on the quote)</option>
+        <option value="Standard" ${fType==="Standard"?"selected":""}>Standard</option>
+        <option value="processing" ${fType==="processing"?"selected":""}>Account already processing</option>
+      </select>
+      <select id="f-segment" onchange="applyFilters()">
+        <option value="all">All segments</option>
+        <option value="vip" ${fSegment==="vip"?"selected":""}>★ VIP/A (Segment A + Premier)</option>
+        ${segments.map(s=>`<option value="${s}" ${fSegment===s?"selected":""}>${s}</option>`).join("")}
+      </select>
       <select id="f-lang" onchange="applyFilters()">
         <option value="all">All languages</option>
         <option value="spanish" ${fLang==="spanish"?"selected":""}>Spanish</option>
@@ -801,9 +1091,11 @@ function renderAll() {
     <div class="table-wrap">
       <table><thead><tr>
         <th data-col="Assigned To"           onclick="sortBy(this)">Assigned To<span class="sort-arrow"></span></th>
+        <th data-col="Case Type"             onclick="sortBy(this)">Type<span class="sort-arrow"></span></th>
         <th data-col="Case Number"           onclick="sortBy(this)">Case #<span class="sort-arrow"></span></th>
         <th data-col="Integration / Product" onclick="sortBy(this)">Product<span class="sort-arrow"></span></th>
         <th data-col="Account Name"          onclick="sortBy(this)">Account<span class="sort-arrow"></span></th>
+        <th data-col="Segment"               onclick="sortBy(this)">Segment<span class="sort-arrow"></span></th>
         <th data-col="Install Date"          onclick="sortBy(this)">Install Date<span class="sort-arrow"></span></th>
         <th data-col="Installer"             onclick="sortBy(this)">Installer<span class="sort-arrow"></span></th>
         <th data-col="Status"                onclick="sortBy(this)">Status<span class="sort-arrow"></span></th>
@@ -837,6 +1129,94 @@ function renderAll() {
   filteredRows = [...lastAssignments];
   currentPage  = 1;
   applyFilters();
+}
+
+// ─────────────────────────────────────────────
+// ADD-ON PRIORITY BANNER
+// ─────────────────────────────────────────────
+function renderAddOnBanner() {
+  const addons = lastAssignments.filter(r => r._addOn);
+  if (!addons.length) return "";
+  const fresh   = addons.filter(r => !r._alreadyAssigned && !r._unassigned);
+  const inSF    = addons.filter(r => r._alreadyAssigned);
+  const noDate  = addons.filter(r => r._noInstallDate).length;
+  const confirmed = addons.filter(r => r["Case Type"] === "Add-On").length;
+
+  return `
+    <div class="warning-banner" style="background:var(--orange-light);border-color:var(--orange)">
+      <h3 style="color:#9A3412">⚡ ${addons.length} add-on${addons.length>1?"s":""} — work these first</h3>
+      <p style="color:#9A3412">
+        ${confirmed} ordered straight from a Dashboard tile, ${addons.length-confirmed} flagged as likely from
+        the creator plus an account already in flight. ${noDate} have no install date — that's expected for an
+        add-on, so they're assigned anyway rather than left waiting.
+        ${fresh.length ? `<strong>${fresh.length} newly assigned</strong> this run.` : ""}
+        ${inSF.length ? ` ${inSF.length} already had an owner in Salesforce.` : ""}
+      </p>
+      <div class="warning-case-list">
+        ${addons.slice(0,40).map(r => `<span class="warning-case" style="border-color:var(--orange);color:#9A3412">
+          ${r["Case Number"]} · ${r["Account Name"]} → ${r["Assigned To"]}</span>`).join("")}
+      </div>
+      ${addons.length > 40 ? `<p style="color:#9A3412;margin-top:4px">…and ${addons.length-40} more — use the ⚡ Add-Ons card to filter.</p>` : ""}
+    </div>`;
+}
+
+// ─────────────────────────────────────────────
+// NEEDS-REVIEW BANNER
+// Cases we deliberately did NOT auto-assign.
+// ─────────────────────────────────────────────
+function renderReviewBanner() {
+  const rev = lastAssignments.filter(r => r._needsReview);
+  if (!rev.length) return "";
+  const grouped = {};
+  rev.forEach(r => {
+    const k = r._typeReason || "Needs review";
+    (grouped[k] = grouped[k] || []).push(r);
+  });
+  const unowned = rev.filter(r => r._unassigned).length;
+
+  return `
+    <div class="warning-banner">
+      <h3>⚠ ${rev.length} case${rev.length>1?"s":""} need review — not auto-assigned</h3>
+      <p>These have no <strong>Integrations Activations</strong> subject, or came from support/email intake, so
+         there's no SKU to work from. ${unowned} of them have no owner at all.
+         They're kept out of the assignment rotation so they don't skew anyone's case count.</p>
+      ${Object.entries(grouped).map(([reason, rows]) => `
+        <div style="margin-bottom:8px">
+          <strong>${reason}</strong> (${rows.length})
+          <div class="warning-case-list" style="margin-top:4px">
+            ${rows.slice(0,25).map(r => `<span class="warning-case">${r["Case Number"]} · ${r["Account Name"]||"(no account)"}</span>`).join("")}
+            ${rows.length>25?`<span class="warning-case">+${rows.length-25} more</span>`:""}
+          </div>
+        </div>`).join("")}
+    </div>`;
+}
+
+// ─────────────────────────────────────────────
+// VIP/A REVIEW BANNER
+// Surfaces the two constraints the engine could not fully satisfy.
+// ─────────────────────────────────────────────
+function renderVipReviewBanner() {
+  const langUnmet = lastAssignments.filter(r => r._langUnmet);
+  const vipUnmet  = lastAssignments.filter(r => r._vipUnmet);
+  if (!langUnmet.length && !vipUnmet.length) return "";
+
+  const block = (rows, title, note) => rows.length ? `
+    <div style="margin-bottom:10px">
+      <strong>${title} (${rows.length})</strong>
+      <p style="margin:2px 0 6px">${note}</p>
+      <div class="warning-case-list">
+        ${rows.map(r => `<span class="warning-case">${r["Case Number"]} · ${r["Account Name"]} → ${r["Assigned To"]}</span>`).join("")}
+      </div>
+    </div>` : "";
+
+  return `
+    <div class="warning-banner">
+      <h3>⚠ ${langUnmet.length + vipUnmet.length} VIP/A case${(langUnmet.length+vipUnmet.length)>1?"s":""} to review</h3>
+      ${block(langUnmet, "Spanish-preferred, routed to a non-bilingual senior specialist",
+        "Seniority won over language for these Segment A / Premier accounts. Check whether the site has someone who can translate — if not, move the case to a bilingual specialist manually.")}
+      ${block(vipUnmet, "No VIP/A specialist available",
+        "These Segment A / Premier accounts went to the next-lightest specialist because no available team member is flagged VIP/A.")}
+    </div>`;
 }
 
 function renderOooWarning() {
@@ -880,8 +1260,9 @@ function renderWorkload() {
         ${w.name}
         ${w.reserve  ? '<span class="mbadge mbadge-res">Res</span>' : ''}
         ${w.bilingual? '<span class="mbadge mbadge-bil">Bil</span>' : ''}
+        ${w.vip      ? '<span class="mbadge mbadge-vip">VIP</span>' : ''}
       </div>
-      <div class="wl-meta">${w.existing} existing · <strong style="color:var(--brand)">${w.newAssigned} new</strong></div>
+      <div class="wl-meta">${w.existing} existing · <strong style="color:var(--brand)">${w.newAssigned} new</strong>${w.vipNew ? ` · <strong style="color:var(--purple)">${w.vipNew} VIP/A</strong>` : ''}${w.addOnNew ? ` · <strong style="color:var(--orange)">⚡${w.addOnNew} add-on</strong>` : ''}</div>
       <div class="wl-bar-bg" style="width:100%">
         <div class="wl-bar-existing" style="width:${totalPct > 0 ? existingPct : 0}%"></div>
         <div class="wl-bar-new${w.reserve?' reserve':''}" style="width:${totalPct > 0 ? newPct : 0}%"></div>
@@ -902,20 +1283,28 @@ function autoReassignOoo() {
   const active      = team.filter(p => !p.ooo);
   const specNames   = active.map(p => p.name);
   const bilingualSet = new Set(active.filter(p => p.bilingual).map(p => p.name));
+  const vipSet       = new Set(active.filter(p => p.vip).map(p => p.name));
   const weightMap   = {}; active.forEach(p => { weightMap[p.name] = p.reserve ? 0.5 : 1.0; });
   const counts      = {}; specNames.forEach(n => counts[n] = lastWorkload.find(w=>w.name===n)?.total||0);
   const effLoad = n => counts[n] / (weightMap[n]||1);
-  const pick = bil => {
+  const pick = (bil, vipOnly) => {
     let c = [...specNames];
-    if (bil && bilingualSet.size > 0) { const b = c.filter(n=>bilingualSet.has(n)); if (b.length) c = b; }
+    if (vipOnly) { const v = c.filter(n=>vipSet.has(n)); if (v.length) c = v; }
+    if (bil)     { const b = c.filter(n=>bilingualSet.has(n)); if (b.length) c = b; }
     return c.reduce((a,b) => effLoad(a) <= effLoad(b) ? a : b);
   };
 
   const today = new Date().toLocaleDateString("en-US");
-  const newlyAssigned = lastOooCases.map(r => {
+  // Add-ons first, then VIP/A — same priority order as the main run
+  const prioO = r => ((r._cls && r._cls.isAddOn) ? 2 : 0) + (isVipSegment(r[COL.SEGMENT]) ? 1 : 0);
+  const orderedOoo = [...lastOooCases].sort((a,b) => prioO(b) - prioO(a));
+  const newlyAssigned = orderedOoo.map(r => {
     const lang    = String(r[COL.PREF_LANG]||"").toLowerCase();
     const needBil = ["spanish","español","es"].includes(lang);
-    const spec    = pick(needBil);
+    const segment = String(r[COL.SEGMENT]||"").trim();
+    const isVip   = isVipSegment(segment);
+    const clsR    = r._cls || { type:T_STANDARD, reason:"", isAddOn:false, needsReview:false, processing:false };
+    const spec    = pick(needBil, isVip);
     counts[spec]++;
     const parentBacklogRe = String(r[COL.PARENT_BACKLOG]||"").trim();
     return {
@@ -923,6 +1312,10 @@ function autoReassignOoo() {
       "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
       "Integration / Product":    String(r[COL.PRODUCT]||"").trim(),
       "Account Name":             String(r[COL.ACCOUNT]||"").trim(),
+      "Segment":                  segment,
+      "Case Type":                clsR.type,
+      "Created By":               String(r[COL.CREATED_BY]||"").trim(),
+      "Account Processing":       clsR.processing ? "Yes" : "",
       "Install Date":             String(r[COL.INSTALL_DATE]||"").trim(),
       "Preferred Language":       String(r[COL.PREF_LANG]||"").trim(),
       "Installer":                String(r[COL.INSTALLER]||"").trim(),
@@ -934,6 +1327,14 @@ function autoReassignOoo() {
       "Latest Comment":           String(r[COL.LATEST_COMMENT]||"").trim(),
       "Last Processing Date":     today,
       "_overdue":                 isOverdue(String(r[COL.INSTALL_DATE]||"")),
+      "_vip":                     isVip,
+      "_vipUnmet":                isVip   && !vipSet.has(spec),
+      "_langUnmet":               needBil && !bilingualSet.has(spec),
+      "_addOn":                   clsR.isAddOn,
+      "_type":                    clsR.type,
+      "_typeReason":              clsR.reason,
+      "_productDerived":          !!r._productDerived,
+      "_processing":              clsR.processing,
       "_reassigned":              true,
       "_nonWorkable":             isNonWorkableFn(parentBacklogRe),
       "_cancelled":               isCancelledFn(String(r[COL.PARENT_STATUS]||"")),
@@ -977,6 +1378,15 @@ function statFilter(type) {
       break;
     case "spanish":
       fLang = "spanish";
+      break;
+    case "vip":
+      fSegment = "vip";
+      break;
+    case "addon":
+      fType = "addon";
+      break;
+    case "review":
+      fType = "Review";
       break;
     case "overdue":
       fOverdue = "overdue";
@@ -1029,7 +1439,7 @@ function statFilter(type) {
 }
 
 function clearStatFilters() {
-  fOwner = "all"; fLang = "all"; fOverdue = "all"; fNonWorkable = "all"; fText = "";
+  fOwner = "all"; fLang = "all"; fOverdue = "all"; fNonWorkable = "all"; fSegment = "all"; fType = "all"; fText = "";
   const fs = document.getElementById("f-search"); if (fs) fs.value = "";
 }
 
@@ -1038,10 +1448,12 @@ function syncDropdowns() {
   const fl = document.getElementById("f-lang");      if (fl) fl.value = fLang;
   const fov = document.getElementById("f-overdue");  if (fov) fov.value = fOverdue;
   const fn = document.getElementById("f-nonworkable"); if (fn) fn.value = fNonWorkable;
+  const fsg = document.getElementById("f-segment");  if (fsg) fsg.value = fSegment;
+  const ft  = document.getElementById("f-type");     if (ft)  ft.value  = fType;
 }
 
 function updateStatCardHighlights() {
-  const map = { new:"sc-new", spanish:"sc-spanish", overdue:"sc-overdue", overdueA:"sc-overdueA",
+  const map = { new:"sc-new", addon:"sc-addon", review:"sc-review", spanish:"sc-spanish", vip:"sc-vip", overdue:"sc-overdue", overdueA:"sc-overdueA",
                 nonworkable:"sc-nw", cancelled:"sc-cancelled", ooo:"sc-ooo", unassigned:"sc-unassigned" };
   Object.values(map).forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove("active"); });
   if (activeStatFilter && map[activeStatFilter]) {
@@ -1059,10 +1471,17 @@ function applyFilters() {
   fLang        = document.getElementById("f-lang")?.value        || "all";
   fOverdue     = document.getElementById("f-overdue")?.value     || "all";
   fNonWorkable = document.getElementById("f-nonworkable")?.value || "all";
+  fSegment     = document.getElementById("f-segment")?.value     || "all";
+  fType        = document.getElementById("f-type")?.value        || "all";
 
   filteredRows = lastAssignments.filter(r => {
+    if (fType === "addon"      && !r._addOn)      return false;
+    if (fType === "processing" && !r._processing)  return false;
+    if (fType !== "all" && fType !== "addon" && fType !== "processing" && r["Case Type"] !== fType) return false;
     if (fOwner !== "all"   && r["Assigned To"] !== fOwner) return false;
     if (fProduct !== "all" && r["Integration / Product"] !== fProduct) return false;
+    if (fSegment === "vip" && !r._vip) return false;
+    if (fSegment !== "all" && fSegment !== "vip" && r["Segment"] !== fSegment) return false;
     if (fLang === "spanish"  && !["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
     if (fLang === "english"  && ["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
     if (fOverdue === "overdue"   && !r._overdue) return false;
@@ -1078,7 +1497,7 @@ function applyFilters() {
     return true;
   });
 
-  if (sortCol) sortInPlace();
+  if (sortCol) sortInPlace(); else defaultSort();
   currentPage = 1;
   const el = document.getElementById("assign-count"); if (el) el.textContent = filteredRows.length;
   // Clear stat card highlight if user manually changed a dropdown
@@ -1103,6 +1522,17 @@ function sortBy(thEl) {
   if (arrow) arrow.textContent = sortAsc ? " ↑" : " ↓";
   sortInPlace(); renderTable();
 }
+// Until the user picks a column, order the table by urgency:
+// add-ons → review cases → overdue → everything else.
+function defaultSort() {
+  const rank = r => r._addOn ? 0 : r._needsReview ? 1 : r._overdue ? 2 : r._unassigned ? 4 : 3;
+  filteredRows.sort((a,b) => {
+    const d = rank(a) - rank(b);
+    if (d) return d;
+    return String(a["Account Name"]||"").localeCompare(String(b["Account Name"]||""));
+  });
+}
+
 function sortInPlace() {
   filteredRows.sort((a,b) => {
     const va = String(a[sortCol]||"").toLowerCase(), vb = String(b[sortCol]||"").toLowerCase();
@@ -1126,7 +1556,7 @@ function renderTable() {
 
   const page = filteredRows.slice(start, start+PAGE_SIZE);
   if (!page.length) {
-    tbody.innerHTML = `<tr><td colspan="13" class="no-data">No cases match the current filters.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="15" class="no-data">No cases match the current filters.</td></tr>`;
   } else {
     tbody.innerHTML = page.map(r => rowHtml(r)).join("");
   }
@@ -1148,12 +1578,38 @@ function rowHtml(r) {
   const alreadyBadge   = r._alreadyAssigned ? `<span class="pill pill-gray" style="margin-left:4px">In SF</span>` : "";
   const nwBadge        = r._nonWorkable ? `<span class="pill" style="background:#1f1f23;color:#fff;margin-left:4px">🚫 Non-Workable</span>` : "";
   const cancelBadge    = r._cancelled   ? `<span class="pill" style="background:#6B21A8;color:#fff;margin-left:4px">❌ Cancelled</span>` : "";
+  const vipUnmetBadge  = r._vipUnmet    ? `<span class="pill pill-yellow" style="margin-left:4px" title="No VIP/A specialist was available — assigned to the next-lightest specialist.">⚠ No VIP avail.</span>` : "";
+  const langUnmetBadge = r._langUnmet   ? `<span class="pill pill-yellow" style="margin-left:4px" title="Spanish-preferred VIP/A account routed to a non-bilingual senior specialist. Check whether the site has someone who can translate.">⚠ Spanish · no bilingual</span>` : "";
+  const seg      = r["Segment"] || "";
+  const segCell  = seg
+    ? `<span class="pill ${segPillClass(seg)}">${seg.replace(/^Segment /,"")}${isVipSegment(seg) ? " ★" : ""}</span>`
+    : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
+
+  // Case type + the "already processing" marker
+  const ty       = r["Case Type"] || "";
+  const tyLabel  = ty === "Add-On" ? "⚡ Add-On" : ty === "Add-On?" ? "⚡ Add-On?" : ty === "Review" ? "⚠ Review" : ty;
+  const typeCell = ty
+    ? `<span class="pill ${typePillClass(ty)}" title="${(r._typeReason||"").replace(/"/g,'&quot;')}">${tyLabel}</span>`
+    : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
+  const procBadge = r._processing
+    ? `<span class="pill pill-teal" style="margin-left:4px;font-size:9px" title="This account already has integration work in flight.">Processing</span>` : "";
+  const noDateBadge = r._addOn && r._noInstallDate
+    ? `<span class="pill pill-gray" style="margin-left:4px;font-size:9px" title="Add-on — no installer visit needed, so no install date is expected.">no install date</span>` : "";
+  const awaitBadge = r._awaitingInstall
+    ? `<span class="pill pill-gray" style="margin-left:4px;font-size:9px" title="Waiting on an install date before it can be assigned.">awaiting install date</span>` : "";
+  const contBadge = r._continuityBroken
+    ? `<span class="pill pill-yellow" style="margin-left:4px" title="This account already had a specialist, but the VIP/A or language rule moved this case to someone else. The account is now split — you may want to consolidate.">⚠ account split</span>` : "";
+  const reviewBadge = r._needsReview
+    ? `<span class="pill pill-red" style="margin-left:4px" title="${(r._typeReason||"").replace(/"/g,'&quot;')}">⚠ Review</span>` : "";
   const assignedPill   = r._unassigned
     ? `<span class="pill pill-gray" style="color:var(--gray-400);font-style:italic">Unassigned</span>`
     : r._alreadyAssigned
       ? `<span class="pill pill-gray">${r["Assigned To"]}</span>`
       : `<span class="pill pill-blue">${r["Assigned To"]}</span>`;
-  const rowClass = r._unassigned ? "unassigned-row" : (r._nonWorkable ? "nonworkable-row" : (r._overdue ? "overdue-row" : ""));
+  const rowClass = r._addOn ? "addon-row"
+    : r._needsReview ? "review-row"
+    : r._unassigned ? "unassigned-row"
+    : (r._nonWorkable ? "nonworkable-row" : (r._overdue ? "overdue-row" : ""));
 
   const statusCell = v => v ? `<span style="font-size:11px;color:var(--gray-700)">${v}</span>` : `<span style="color:var(--gray-200)">—</span>`;
   const parentBacklog = r["Parent Backlog Status"] || "";
@@ -1162,10 +1618,12 @@ function rowHtml(r) {
     : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
 
   return `<tr class="${rowClass}">
-    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${nwBadge}${cancelBadge}</td>
+    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${reviewBadge}${contBadge}${vipUnmetBadge}${langUnmetBadge}${nwBadge}${cancelBadge}</td>
+    <td>${typeCell}${noDateBadge}${awaitBadge}</td>
     <td>${r["Case Number"]}</td>
-    <td><span class="pill ${prodCls}">${r["Integration / Product"]}</span></td>
-    <td>${r["Account Name"]}</td>
+    <td><span class="pill ${prodCls}">${r["Integration / Product"]}</span>${r._productDerived ? `<span class="pill pill-gray" style="margin-left:3px;font-size:9px" title="Product Name was blank in the report — recovered from the subject line. Worth a spot-check.">from subject</span>` : ""}</td>
+    <td>${r["Account Name"]}${procBadge}</td>
+    <td>${segCell}</td>
     <td style="white-space:nowrap">${r["Install Date"]}${overdueBadge}</td>
     <td style="color:var(--gray-400);font-size:11px">${r["Installer"]||""}</td>
     <td>${statusCell(r["Status"])}</td>
@@ -1191,9 +1649,9 @@ function renderInstallerView(tbody, rows) {
   const sortedKeys = Object.keys(groups).sort();
   tbody.innerHTML = sortedKeys.map(key => {
     const g = groups[key];
-    const hdr = `<tr class="installer-group-hdr"><td colspan="13">📅 ${g.installer} &mdash; ${g.date} <span style="font-weight:400;color:var(--gray-400)">(${g.rows.length} case${g.rows.length>1?"s":""})</span></td></tr>`;
+    const hdr = `<tr class="installer-group-hdr"><td colspan="15">📅 ${g.installer} &mdash; ${g.date} <span style="font-weight:400;color:var(--gray-400)">(${g.rows.length} case${g.rows.length>1?"s":""})</span></td></tr>`;
     return hdr + g.rows.map(r => rowHtml(r)).join("");
-  }).join("") || `<tr><td colspan="7" class="no-data">No cases match the current filters.</td></tr>`;
+  }).join("") || `<tr><td colspan="15" class="no-data">No cases match the current filters.</td></tr>`;
 }
 
 function setPageSize(val) {
@@ -1281,8 +1739,19 @@ function uSortBy(col) {
 function exportCSV(filteredOnly) {
   const rows = filteredOnly ? filteredRows : lastAssignments;
   if (!rows.length) return;
-  const cols = ["Assigned To","Case Number","Integration / Product","Account Name","Install Date","Installer","Status","Sub Status","Parent Status","Parent Backlog Status","Backlog Sub Status","Preferred Language","Latest Comment","Last Processing Date"];
-  const data = [cols, ...rows.map(r => cols.map(c => r[c]||""))];
+  const cols = ["Assigned To","Case Type","Case Number","Integration / Product","Account Name","Segment","Account Processing","Created By","Install Date","Installer","Status","Sub Status","Parent Status","Parent Backlog Status","Backlog Sub Status","Preferred Language","Latest Comment","Last Processing Date"];
+  const reviewFlag = r => {
+    const f = [];
+    if (r._addOn)     f.push("ADD-ON — priority");
+    if (r._needsReview) f.push("NEEDS REVIEW — " + (r._typeReason||"no activation subject"));
+    if (r._continuityBroken) f.push("Account split — a hard rule moved this off the account's existing specialist");
+    if (r._vipUnmet)  f.push("No VIP/A specialist available");
+    if (r._langUnmet) f.push("Spanish preferred — assigned specialist is not bilingual");
+    if (r._awaitingInstall) f.push("Awaiting install date");
+    return f.join(" | ");
+  };
+  const outCols = [...cols, "Review Flag"];
+  const data = [outCols, ...rows.map(r => [...cols.map(c => r[c]||""), reviewFlag(r)])];
   const csv  = data.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], {type:"text/csv"});
   const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
