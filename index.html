@@ -134,6 +134,10 @@
   tbody tr.addon-row:hover { background: #ffeee5; }
   tbody tr.review-row { background: #fdf4f4; box-shadow: inset 3px 0 0 var(--red); }
   tbody tr.review-row:hover { background: #fbeaea; }
+  tbody tr.attention-row { background: #fdf6f2; box-shadow: inset 3px 0 0 #7C2D12; }
+  tbody tr.attention-row:hover { background: #fbece4; }
+  tbody tr.undoc-row { background: #f2fbf8; box-shadow: inset 3px 0 0 #0F766E; }
+  tbody tr.undoc-row:hover { background: #e6f7f2; }
 
   /* ── Workload ── */
   .workload-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(195px,1fr)); gap: 10px; margin-bottom: 16px; }
@@ -280,6 +284,9 @@
     <div class="legend-row"><span class="pill pill-yellow" style="font-size:9px">⚡ Add-On?</span> Likely add-on</div>
     <div class="legend-row"><span class="pill pill-teal" style="font-size:9px">Processing</span> Account already in flight</div>
     <div class="legend-row"><span class="pill pill-red" style="font-size:9px">⚠ Review</span> No SKU — not assigned</div>
+    <div class="legend-row"><span class="pill" style="background:#7C2D12;color:#fff;font-size:9px">⏳ untouched</span> Nobody opened it in 4 bus. days</div>
+    <div class="legend-row"><span class="pill" style="background:#0F766E;color:#fff;font-size:9px">✎ no note logged</span> Worked, but not written up</div>
+    <div class="legend-row"><span class="pill" style="background:#92400E;color:#fff;font-size:9px">📋 note due</span> Install close/past, no note</div>
   </div>
 </aside>
 
@@ -303,8 +310,10 @@
       <div class="stat-card"           id="sc-accounts"                              ><div class="lbl">Accounts</div><div class="val" id="s-accounts">0</div><div class="sub">unique</div></div>
       <div class="stat-card clickable" id="sc-spanish"  onclick="statFilter('spanish')"><div class="lbl">Spanish</div><div class="val" id="s-spanish">0</div><div class="sub">bilingual routed</div></div>
       <div class="stat-card clickable" id="sc-vip"      onclick="statFilter('vip')"><div class="lbl">VIP / A</div><div class="val" id="s-vip">0</div><div class="sub">Segment A + Premier</div></div>
-      <div class="stat-card warn clickable" id="sc-overdue"  onclick="statFilter('overdue')"><div class="lbl">Overdue (New)</div><div class="val" id="s-overdue">0</div><div class="sub">past install date</div></div>
-      <div class="stat-card warn clickable" id="sc-overdueA" onclick="statFilter('overdueA')"><div class="lbl">Overdue (Assigned)</div><div class="val" id="s-overdue-assigned">0</div><div class="sub">already in Salesforce</div></div>
+      <div class="stat-card warn clickable" id="sc-neglected" onclick="statFilter('neglected')"><div class="lbl">⏳ Neglected</div><div class="val" id="s-neglected">0</div><div class="sub">untouched 4+ business days</div></div>
+      <div class="stat-card warn clickable" id="sc-undoc"     onclick="statFilter('undocumented')"><div class="lbl">✎ Undocumented</div><div class="val" id="s-undoc">0</div><div class="sub">worked, but no note</div></div>
+      <div class="stat-card warn clickable" id="sc-missnote"  onclick="statFilter('missingnote')"><div class="lbl">📋 Missing Note</div><div class="val" id="s-missnote">0</div><div class="sub">note is due, none written</div></div>
+      <div class="stat-card warn clickable" id="sc-overdue"   onclick="statFilter('overdue')"><div class="lbl">📅 Past Install Date</div><div class="val" id="s-overdue">0</div><div class="sub">all cases</div></div>
       <div class="stat-card warn clickable" id="sc-nw"       onclick="statFilter('nonworkable')"><div class="lbl">Non-Workable</div><div class="val" id="s-nonworkable">0</div><div class="sub">parent case blocked</div></div>
       <div class="stat-card warn clickable" id="sc-cancelled" onclick="statFilter('cancelled')"><div class="lbl">Cancelled</div><div class="val" id="s-cancelled">0</div><div class="sub">parent case cancelled</div></div>
       <div class="stat-card warn clickable" id="sc-ooo"      onclick="statFilter('ooo')"><div class="lbl">OOO Cases</div><div class="val" id="s-ooo">0</div><div class="sub">need reassignment</div></div>
@@ -350,7 +359,37 @@ const COL = {
   CREATED_BY:       "Created By",
   SUBJECT:          "Subject",
   LAST_PROCESSING:  "Case : Account Name : Last Processing Date",
+  LAST_MODIFIED:    "Last Modified Date",
+  LAST_MODIFIED_BY: "Last Modified By",
 };
+
+// How long a case may sit untouched before it counts as neglected.
+const STALE_BUSINESS_DAYS = 4;
+// How close an install date has to be before we expect a Latest Update.
+// A case installing three weeks out with no note yet is simply a fresh case.
+const NOTE_EXPECTED_WITHIN = 5;
+
+// Backlog Sub Status values that mean the specialist genuinely can't act.
+// These are excluded from all three attention flags, same as Non-Workable.
+const BACKLOGGED_SUB = new Set(["pending parent case", "product gap/oversold"]);
+
+// Integration and system users. A Last Modified Date bumped by one of these is
+// not a person working the case, so it can't count as undocumented activity.
+// Anything not listed here is treated as a human edit.
+const AUTOMATED_USERS = new Set([
+  "system",
+  "gpv integration user",
+  "spoton marketplace service api ordering",
+  "talkdesk integration",
+  "sfdc eng int user",
+  "automated process",
+  "data loader",
+  "integration user",
+  "teamwork activations",
+]);
+function isAutomatedUser(name) {
+  return AUTOMATED_USERS.has(String(name||"").toLowerCase().trim());
+}
 
 // ─────────────────────────────────────────────
 // CASE CLASSIFICATION (add-ons vs new installs vs review)
@@ -680,6 +719,123 @@ function isOverdue(dateStr) {
   return d < today;
 }
 function isNonWorkableFn(s) { const l = (s||"").toLowerCase().trim(); return l.includes("non-workable") || l === "non workable"; }
+
+// ─────────────────────────────────────────────
+// STALENESS — "has anyone touched this lately?"
+// ─────────────────────────────────────────────
+// Business days, weekends only — no holiday calendar to keep up to date.
+function businessDaysBack(from, n) {
+  const d = new Date(from.getTime()); d.setHours(0,0,0,0);
+  let left = n;
+  while (left > 0) {
+    d.setDate(d.getDate() - 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) left--;
+  }
+  return d;
+}
+function businessDaysBetween(from, to) {
+  if (!from || !to || from >= to) return 0;
+  const d = new Date(from.getTime()); d.setHours(0,0,0,0);
+  const end = new Date(to.getTime());  end.setHours(0,0,0,0);
+  let n = 0;
+  while (d < end) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) n++;
+  }
+  return n;
+}
+
+// Latest Update is a free-text note, but specialists nearly always lead with
+// the date — "9/9 A1 - Intro email sent", "9/3: no matching location".
+// Pull that out when it's there; a note with no date gives us nothing.
+function latestUpdateDate(text) {
+  const s = String(text||"").trim();
+  if (!s) return null;
+  const m = s.match(/^\s*(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?/);
+  if (!m) return null;
+  const mo = +m[1], da = +m[2];
+  if (mo < 1 || mo > 12 || da < 1 || da > 31) return null;
+  const now = new Date();
+  let yr;
+  if (m[3]) { yr = +m[3]; if (yr < 100) yr += 2000; }
+  else      { yr = mo <= (now.getMonth()+1) ? now.getFullYear() : now.getFullYear()-1; }
+  const d = new Date(yr, mo-1, da);
+  return isNaN(d) ? null : d;
+}
+
+// The specialist's written note is the real signal of human activity, so it
+// wins. Where there's no dated note we fall back to Last Modified Date, which
+// Salesforce always populates.
+function lastTouchDate(r) {
+  return latestUpdateDate(r[COL.LATEST_COMMENT]) || parseDate(String(r[COL.LAST_MODIFIED]||""));
+}
+function isBackloggedFn(subStatus) {
+  return BACKLOGGED_SUB.has(String(subStatus||"").toLowerCase().trim());
+}
+function businessDaysForward(from, n) {
+  const d = new Date(from.getTime()); d.setHours(0,0,0,0);
+  let left = n;
+  while (left > 0) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) left--;
+  }
+  return d;
+}
+
+// ─────────────────────────────────────────────
+// THE THREE ACTIVITY FLAGS
+// ─────────────────────────────────────────────
+// Last Modified moves on ANY edit; Latest Update only moves when a specialist
+// writes one. Comparing them separates three different problems:
+//
+//   Neglected    — Last Modified is old. Nobody has touched the case at all.
+//   Undocumented — Last Modified is recent and a person made that edit, but no
+//                  dated note reflects it. Someone worked it and didn't log it.
+//   Missing Note — no note at all, on a case far enough along that one is due.
+//
+// A note without a leading date ("unable to find location, still digging") is
+// treated as present but undated — it tells us a human wrote something, so it
+// never counts as undocumented, and we measure recency from Last Modified.
+function activityFlags(r, cutoff, now, hasModifiedByCol) {
+  const blocked    = isNonWorkableFn(String(r[COL.PARENT_BACKLOG]||"")) ||
+                     isBackloggedFn(String(r[COL.BACKLOG_SUB]||""));
+  const noteText   = String(r[COL.LATEST_COMMENT]||"").trim();
+  const noteDate   = latestUpdateDate(noteText);
+  const modDate    = parseDate(String(r[COL.LAST_MODIFIED]||""));
+  const modBy      = String(r[COL.LAST_MODIFIED_BY]||"").trim();
+  const humanEdit  = hasModifiedByCol ? (!!modBy && !isAutomatedUser(modBy)) : true;
+
+  const touch      = noteDate || modDate;          // best evidence of activity
+  const staleDays  = touch ? businessDaysBetween(touch, now) : null;
+  const modStale   = !!modDate && modDate < cutoff;
+
+  const neglected    = !blocked && modStale;
+  const undocumented = !blocked && !modStale && humanEdit &&
+                       (!noteText || (noteDate && noteDate < cutoff));
+
+  // Is a note due yet? Past install, install close at hand, or the account is
+  // already processing. A distant install date means nothing is late.
+  const inst       = parseDate(String(r[COL.INSTALL_DATE]||""));
+  const soon       = businessDaysForward(now, NOTE_EXPECTED_WITHIN);
+  const today0     = new Date(now.getTime()); today0.setHours(0,0,0,0);
+  const processing = !!String(r[COL.LAST_PROCESSING]||"").trim();
+  const noteDue    = (inst && inst < today0) || (inst && inst <= soon) || processing;
+  const missingNote = !blocked && !noteText && noteDue;
+
+  return {
+    blocked, neglected, undocumented, missingNote,
+    staleDays, noteDate, modDate, modBy,
+    noNote: !noteText,
+    undatedNote: !!noteText && !noteDate,
+    modifiedAfterNote: (noteDate && modDate) ? businessDaysBetween(noteDate, modDate) : 0,
+    noteDueReason: !noteText && noteDue
+      ? ((inst && inst < today0) ? "install date has passed"
+        : (inst && inst <= soon) ? "install date is within " + NOTE_EXPECTED_WITHIN + " business days"
+        : "account is already processing")
+      : "",
+    touchDate: touch,
+  };
+}
 function isCancelledFn(s)    { const l = (s||"").toLowerCase().trim(); return l === "cancelled" || l === "canceled"; }
 
 // ─────────────────────────────────────────────
@@ -702,6 +858,11 @@ function matchOwner(owner, names) {
 function runAssignments() {
   if (!reportRows) return;
   const today = new Date().toLocaleDateString("en-US");
+  const staleCutoff = businessDaysBack(new Date(), STALE_BUSINESS_DAYS);
+  const now = new Date();
+  // Without Last Modified By we can't tell a specialist's edit from an
+  // automated one, so the Undocumented flag is best-effort and says so.
+  const hasModifiedByCol = reportRows.some(r => COL.LAST_MODIFIED_BY in r);
 
   const active     = team.filter(p => !p.ooo);
   const oooMembers = team.filter(p => p.ooo).map(p => p.name);
@@ -869,6 +1030,17 @@ function runAssignments() {
       "_type":                    cls.type,
       "_typeReason":              cls.reason,
       "_productDerived":          !!r._productDerived,
+      // Just assigned — nothing to chase yet, so no activity flags.
+      "_needsAttention":          false,
+      "_neglected":               false,
+      "_undocumented":            false,
+      "_missingNote":             false,
+      "_staleDays":               (() => { const t = lastTouchDate(r); return t ? businessDaysBetween(t, now) : null; })(),
+      "_noUpdateLogged":          !String(r[COL.LATEST_COMMENT]||"").trim(),
+      "_backlogged":              isBackloggedFn(String(r[COL.BACKLOG_SUB]||"")),
+      "Last Touch":               (() => { const t = lastTouchDate(r); return t ? t.toLocaleDateString("en-US") : ""; })(),
+      "Days Since Update":        (() => { const t = lastTouchDate(r); return t ? String(businessDaysBetween(t, now)) : ""; })(),
+      "Last Modified By":         String(r[COL.LAST_MODIFIED_BY]||"").trim(),
       "_processing":              cls.processing,
       "_needsReview":             false,
       "_noInstallDate":           !date || date === "nan" || date === "None",
@@ -897,7 +1069,18 @@ function runAssignments() {
     const nonWorkable   = isNonWorkableFn(parentBacklog);
     const cancelled     = isCancelledFn(parentStatus);
     const clsA          = r._cls || classifyCase(r, processingAccounts);
-    if (!overdue && !nonWorkable && !cancelled && !clsA.isAddOn && !clsA.needsReview) return;
+
+    // ── Activity flags ──
+    // Only cases that already have an owner in Salesforce are eligible for
+    // Neglected and Undocumented; a case assigned by this run has only just
+    // landed with someone, so there's nothing to chase yet.
+    const af          = activityFlags(r, staleCutoff, now, hasModifiedByCol);
+    const backlogged  = af.blocked;
+    const staleDays   = af.staleDays;
+    const noUpdateLog = af.noNote;
+    const attention   = af.neglected || af.undocumented || af.missingNote;
+
+    if (!overdue && !nonWorkable && !cancelled && !clsA.isAddOn && !clsA.needsReview && !attention) return;
     flaggedAssigned.push({
       "Assigned To":              String(r[COL.OWNER]||"").trim(),
       "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
@@ -923,6 +1106,19 @@ function runAssignments() {
       "_type":                    clsA.type,
       "_typeReason":              clsA.reason,
       "_productDerived":          !!r._productDerived,
+      "_needsAttention":          attention,
+      "_neglected":               af.neglected,
+      "_undocumented":            af.undocumented,
+      "_missingNote":             af.missingNote,
+      "_noteDueReason":           af.noteDueReason,
+      "_undatedNote":             af.undatedNote,
+      "_modifiedAfterNote":       af.modifiedAfterNote,
+      "_staleDays":               staleDays,
+      "_noUpdateLogged":          noUpdateLog,
+      "_backlogged":              backlogged,
+      "Last Touch":               af.touchDate ? af.touchDate.toLocaleDateString("en-US") : "",
+      "Days Since Update":        staleDays == null ? "" : String(staleDays),
+      "Last Modified By":         af.modBy,
       "_processing":              clsA.processing,
       "_needsReview":             clsA.needsReview,
       "_noInstallDate":           !date || date === "nan" || date === "None",
@@ -946,6 +1142,7 @@ function runAssignments() {
       const ps = String(r[COL.PARENT_STATUS]||"").trim();
       const hasInstall = inst && inst !== "nan" && inst !== "None";
       const clsU = r._cls || classifyCase(r, processingAccounts);
+      const afU  = activityFlags(r, staleCutoff, now, hasModifiedByCol);
       unassigned.push({
         "Assigned To":           clsU.needsReview ? "— Needs Review —" : "— Unassigned —",
         "Case Number":           caseNum,
@@ -971,6 +1168,20 @@ function runAssignments() {
         "_type":                 clsU.type,
         "_typeReason":           clsU.reason,
         "_productDerived":       !!r._productDerived,
+        // No owner to chase, so Neglected and Undocumented don't apply — but a
+        // missing note still does, since an install date or a processing
+        // account means the work is due regardless of who owns it.
+        "_neglected":            false,
+        "_undocumented":         false,
+        "_missingNote":          afU.missingNote,
+        "_needsAttention":       afU.missingNote,
+        "_noteDueReason":        afU.noteDueReason,
+        "_staleDays":            afU.staleDays,
+        "_noUpdateLogged":       afU.noNote,
+        "_backlogged":           afU.blocked,
+        "Last Touch":            afU.touchDate ? afU.touchDate.toLocaleDateString("en-US") : "",
+        "Days Since Update":     afU.staleDays == null ? "" : String(afU.staleDays),
+        "Last Modified By":      String(r[COL.LAST_MODIFIED_BY]||"").trim(),
         "_processing":           clsU.processing,
         "_needsReview":          clsU.needsReview,
         "_noInstallDate":        !hasInstall,
@@ -995,7 +1206,9 @@ function runAssignments() {
   document.getElementById("s-vip").textContent       = assignments.filter(a=>a._vip).length;
   document.getElementById("s-addon").textContent     = lastAssignments.filter(a=>a._addOn).length;
   document.getElementById("s-review").textContent    = lastAssignments.filter(a=>a._needsReview).length;
-  document.getElementById("s-overdue-assigned").textContent = lastAssignments.filter(a => a._overdue && a._alreadyAssigned).length;
+  document.getElementById("s-neglected").textContent = lastAssignments.filter(a => a._neglected).length;
+  document.getElementById("s-undoc").textContent     = lastAssignments.filter(a => a._undocumented).length;
+  document.getElementById("s-missnote").textContent  = lastAssignments.filter(a => a._missingNote).length;
   document.getElementById("s-nonworkable").textContent = lastAssignments.filter(a => a._nonWorkable).length;
   document.getElementById("s-cancelled").textContent   = lastAssignments.filter(a => a._cancelled).length;
   document.getElementById("s-overdue").textContent   = overdueCount;
@@ -1020,6 +1233,7 @@ function renderAll() {
 
   scroll.innerHTML = `
     ${renderAddOnBanner()}
+    ${renderAttentionBanner()}
     ${lastOooCases.length ? renderOooWarning() : ""}
     ${renderReviewBanner()}
     ${renderVipReviewBanner()}
@@ -1075,9 +1289,14 @@ function renderAll() {
         <option value="english" ${fLang==="english"?"selected":""}>English</option>
       </select>
       <select id="f-overdue" onchange="applyFilters()">
-        <option value="all">All dates</option>
-        <option value="overdue" ${fOverdue==="overdue"?"selected":""}>⚠ Overdue only</option>
-        <option value="upcoming" ${fOverdue==="upcoming"?"selected":""}>Upcoming only</option>
+        <option value="all">All dates &amp; activity</option>
+        <option value="neglected"    ${fOverdue==="neglected"?"selected":""}>⏳ Neglected (untouched)</option>
+        <option value="undocumented" ${fOverdue==="undocumented"?"selected":""}>✎ Undocumented (worked, no note)</option>
+        <option value="missingnote"  ${fOverdue==="missingnote"?"selected":""}>📋 Missing note (note is due)</option>
+        <option value="anyattention" ${fOverdue==="anyattention"?"selected":""}>Any of the three above</option>
+        <option value="overdue"      ${fOverdue==="overdue"?"selected":""}>📅 Past install date</option>
+        <option value="noupdate"     ${fOverdue==="noupdate"?"selected":""}>No note ever written</option>
+        <option value="upcoming"     ${fOverdue==="upcoming"?"selected":""}>Upcoming install only</option>
       </select>
       <select id="f-nonworkable" onchange="applyFilters()">
         <option value="all">All statuses</option>
@@ -1104,6 +1323,7 @@ function renderAll() {
         <th data-col="Parent Backlog Status" onclick="sortBy(this)">Parent Backlog<span class="sort-arrow"></span></th>
         <th data-col="Backlog Sub Status"    onclick="sortBy(this)">Backlog Sub<span class="sort-arrow"></span></th>
         <th data-col="Preferred Language"    onclick="sortBy(this)">Language<span class="sort-arrow"></span></th>
+        <th data-col="Days Since Update"     onclick="sortBy(this)">Last Touch<span class="sort-arrow"></span></th>
         <th data-col="Latest Comment"        onclick="sortBy(this)">Latest Update<span class="sort-arrow"></span></th>
       </tr></thead>
       <tbody id="assign-tbody"></tbody></table>
@@ -1158,6 +1378,60 @@ function renderAddOnBanner() {
       </div>
       ${addons.length > 40 ? `<p style="color:#9A3412;margin-top:4px">…and ${addons.length-40} more — use the ⚡ Add-Ons card to filter.</p>` : ""}
     </div>`;
+}
+
+// ─────────────────────────────────────────────
+// NEEDS-ATTENTION BANNER
+// Grouped by owner, because chasing these is a per-person conversation.
+// ─────────────────────────────────────────────
+function renderAttentionBanner() {
+  const neg  = lastAssignments.filter(r => r._neglected);
+  const und  = lastAssignments.filter(r => r._undocumented);
+  const mis  = lastAssignments.filter(r => r._missingNote);
+  if (!neg.length && !und.length && !mis.length) return "";
+
+  const ownerBlock = (rows, colour) => {
+    const byOwner = {};
+    rows.forEach(r => { (byOwner[r["Assigned To"]] = byOwner[r["Assigned To"]] || []).push(r); });
+    return Object.entries(byOwner).sort((a,b) => b[1].length - a[1].length).map(([name, list]) => {
+      const sorted = [...list].sort((a,b) => (b._staleDays||0) - (a._staleDays||0));
+      return `<div style="margin-bottom:6px">
+        <strong>${name}</strong>
+        <span class="mbadge" style="background:${colour};color:#fff;margin-left:4px">${list.length}</span>
+        <div class="warning-case-list" style="margin-top:3px">
+          ${sorted.slice(0,10).map(r => `<span class="warning-case" style="border-color:${colour};color:${colour}">
+            ${r["Case Number"]} · ${r["Account Name"]}${r._staleDays != null ? " · "+r._staleDays+"bd" : ""}</span>`).join("")}
+          ${sorted.length>10?`<span class="warning-case" style="border-color:${colour};color:${colour}">+${sorted.length-10} more</span>`:""}
+        </div>
+      </div>`;
+    }).join("");
+  };
+
+  const section = (rows, colour, bg, icon, title, blurb) => rows.length ? `
+    <div class="warning-banner" style="background:${bg};border-color:${colour};margin-bottom:12px">
+      <h3 style="color:${colour}">${icon} ${rows.length} ${title}</h3>
+      <p style="color:${colour}">${blurb}</p>
+      ${ownerBlock(rows, colour)}
+    </div>` : "";
+
+  const worst  = neg.length ? Math.max(...neg.map(r => r._staleDays||0)) : 0;
+  const over20 = neg.filter(r => (r._staleDays||0) >= 20).length;
+  const byAuto = und.filter(r => !r["Last Modified By"]).length;
+
+  return `
+    ${section(neg, "#7C2D12", "#FDF6F2", "⏳", `case${neg.length>1?"s":""} neglected — nobody has touched them`,
+      `Last Modified is older than ${STALE_BUSINESS_DAYS} business days, so no one has opened these at all.
+       ${over20 ? `<strong>${over20} are past 20 business days</strong>, the worst at ${worst}.` : `The worst is ${worst} business days.`}
+       Non-Workable and backlogged cases are excluded, and so are cases assigned in this run.`)}
+    ${section(und, "#0F766E", "#ECFDF9", "✎", `case${und.length>1?"s":""} worked but not documented`,
+      `A person edited these within the last ${STALE_BUSINESS_DAYS} business days, but no Latest Update reflects it —
+       someone did the work and didn't write it down. Edits by GPV Integration User, System and other
+       integration users are excluded, so these are real human edits.
+       ${byAuto ? ` ${byAuto} had no Last Modified By value and are included on a best-effort basis.` : ""}`)}
+    ${section(mis, "#92400E", "#FEF7E7", "📋", `case${mis.length>1?"s":""} with a note now due`,
+      `No Latest Update has ever been written, and these are far enough along that one is expected —
+       the install date has passed or is within ${NOTE_EXPECTED_WITHIN} business days, or the account is already processing.
+       Cases with a distant install date are deliberately left out; nothing is late about those yet.`)}`;
 }
 
 // ─────────────────────────────────────────────
@@ -1331,6 +1605,11 @@ function autoReassignOoo() {
       "_vipUnmet":                isVip   && !vipSet.has(spec),
       "_langUnmet":               needBil && !bilingualSet.has(spec),
       "_addOn":                   clsR.isAddOn,
+      "_needsAttention":          false,   // freshly reassigned
+      "_staleDays":               (() => { const t = lastTouchDate(r); return t ? businessDaysBetween(t, new Date()) : null; })(),
+      "_noUpdateLogged":          !String(r[COL.LATEST_COMMENT]||"").trim(),
+      "Last Touch":               (() => { const t = lastTouchDate(r); return t ? t.toLocaleDateString("en-US") : ""; })(),
+      "Days Since Update":        (() => { const t = lastTouchDate(r); return t ? String(businessDaysBetween(t, new Date())) : ""; })(),
       "_type":                    clsR.type,
       "_typeReason":              clsR.reason,
       "_productDerived":          !!r._productDerived,
@@ -1390,11 +1669,15 @@ function statFilter(type) {
       break;
     case "overdue":
       fOverdue = "overdue";
-      // also exclude already-assigned
       break;
-    case "overdueA":
-      fOverdue = "overdue";
-      fOwner   = "all";
+    case "neglected":
+      fOverdue = "neglected";
+      break;
+    case "undocumented":
+      fOverdue = "undocumented";
+      break;
+    case "missingnote":
+      fOverdue = "missingnote";
       break;
     case "nonworkable":
       fNonWorkable = "nonworkable";
@@ -1425,14 +1708,6 @@ function statFilter(type) {
   } else {
     applyFilters();
   }
-  // For overdueA, further narrow to already-assigned after applyFilters
-  if (type === "overdueA") {
-    filteredRows = filteredRows.filter(r => r._overdue && r._alreadyAssigned);
-    if (sortCol) sortInPlace();
-    currentPage = 1;
-    const el = document.getElementById("assign-count"); if (el) el.textContent = filteredRows.length;
-    renderTable();
-  }
   updateStatCardHighlights();
   // Scroll to assignments table
   document.getElementById("assign-tbody")?.closest(".table-wrap")?.scrollIntoView({behavior:"smooth", block:"start"});
@@ -1453,7 +1728,8 @@ function syncDropdowns() {
 }
 
 function updateStatCardHighlights() {
-  const map = { new:"sc-new", addon:"sc-addon", review:"sc-review", spanish:"sc-spanish", vip:"sc-vip", overdue:"sc-overdue", overdueA:"sc-overdueA",
+  const map = { new:"sc-new", addon:"sc-addon", review:"sc-review", spanish:"sc-spanish", vip:"sc-vip",
+                neglected:"sc-neglected", undocumented:"sc-undoc", missingnote:"sc-missnote", overdue:"sc-overdue",
                 nonworkable:"sc-nw", cancelled:"sc-cancelled", ooo:"sc-ooo", unassigned:"sc-unassigned" };
   Object.values(map).forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove("active"); });
   if (activeStatFilter && map[activeStatFilter]) {
@@ -1485,6 +1761,11 @@ function applyFilters() {
     if (fLang === "spanish"  && !["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
     if (fLang === "english"  && ["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
     if (fOverdue === "overdue"   && !r._overdue) return false;
+    if (fOverdue === "neglected"    && !r._neglected)    return false;
+    if (fOverdue === "undocumented" && !r._undocumented) return false;
+    if (fOverdue === "missingnote"  && !r._missingNote)  return false;
+    if (fOverdue === "anyattention" && !r._needsAttention) return false;
+    if (fOverdue === "noupdate"     && !r._noUpdateLogged) return false;
     if (fOverdue === "upcoming"  && r._overdue)  return false;
     if (fNonWorkable === "nonworkable" && !r._nonWorkable)               return false;
     if (fNonWorkable === "cancelled"  && !r._cancelled)                  return false;
@@ -1525,10 +1806,16 @@ function sortBy(thEl) {
 // Until the user picks a column, order the table by urgency:
 // add-ons → review cases → overdue → everything else.
 function defaultSort() {
-  const rank = r => r._addOn ? 0 : r._needsReview ? 1 : r._overdue ? 2 : r._unassigned ? 4 : 3;
+  const rank = r => r._addOn ? 0 : r._neglected ? 1 : r._undocumented ? 2 : r._missingNote ? 3
+    : r._needsReview ? 4 : r._overdue ? 5 : r._unassigned ? 7 : 6;
   filteredRows.sort((a,b) => {
     const d = rank(a) - rank(b);
     if (d) return d;
+    // Inside the attention band, stalest first — that's the working order
+    if (rank(a) === 1) {
+      const sd = (b._staleDays||0) - (a._staleDays||0);
+      if (sd) return sd;
+    }
     return String(a["Account Name"]||"").localeCompare(String(b["Account Name"]||""));
   });
 }
@@ -1556,7 +1843,7 @@ function renderTable() {
 
   const page = filteredRows.slice(start, start+PAGE_SIZE);
   if (!page.length) {
-    tbody.innerHTML = `<tr><td colspan="15" class="no-data">No cases match the current filters.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" class="no-data">No cases match the current filters.</td></tr>`;
   } else {
     tbody.innerHTML = page.map(r => rowHtml(r)).join("");
   }
@@ -1601,12 +1888,30 @@ function rowHtml(r) {
     ? `<span class="pill pill-yellow" style="margin-left:4px" title="This account already had a specialist, but the VIP/A or language rule moved this case to someone else. The account is now split — you may want to consolidate.">⚠ account split</span>` : "";
   const reviewBadge = r._needsReview
     ? `<span class="pill pill-red" style="margin-left:4px" title="${(r._typeReason||"").replace(/"/g,'&quot;')}">⚠ Review</span>` : "";
+  const neglBadge = r._neglected
+    ? `<span class="pill" style="background:#7C2D12;color:#fff;margin-left:4px" title="Nobody has touched this case in ${r._staleDays} business days. Last activity ${r["Last Touch"]||"unknown"}.">⏳ ${r._staleDays}bd untouched</span>` : "";
+  const undocBadge = r._undocumented
+    ? `<span class="pill" style="background:#0F766E;color:#fff;margin-left:4px" title="${r["Last Modified By"]||"Someone"} edited this case recently, but no Latest Update reflects it${r._modifiedAfterNote ? ` — modified ${r._modifiedAfterNote} business days after the last note` : ""}.">✎ no note logged</span>` : "";
+  const missBadge = r._missingNote
+    ? `<span class="pill" style="background:#92400E;color:#fff;margin-left:4px" title="No Latest Update has ever been written, and one is due: ${r._noteDueReason||""}.">📋 note due</span>` : "";
+
+  // Last Touch cell — the date we measured from, plus how stale it is
+  const sd = r._staleDays;
+  const touchCell = r["Last Touch"]
+    ? `<span style="font-size:11px;color:var(--gray-700);white-space:nowrap">${r["Last Touch"]}</span>
+       <span class="pill ${sd == null ? 'pill-gray' : sd >= 20 ? 'pill-red' : sd >= 5 ? 'pill-orange' : 'pill-gray'}" style="margin-left:4px;font-size:9px">${sd == null ? "—" : sd + "bd"}</span>
+       ${r["Last Modified By"] ? `<div style="font-size:9px;color:var(--gray-400);margin-top:2px;white-space:nowrap" title="Last Modified By">${r["Last Modified By"]}</div>` : ""}
+       ${r._noUpdateLogged ? `<span class="pill pill-gray" style="margin-left:3px;font-size:9px" title="No Latest Update has ever been written on this case — the date shown is Last Modified.">no note</span>` : ""}
+       ${r._undatedNote ? `<span class="pill pill-gray" style="margin-left:3px;font-size:9px" title="There is a Latest Update note, but it doesn't start with a date — so recency is measured from Last Modified.">undated note</span>` : ""}`
+    : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
   const assignedPill   = r._unassigned
     ? `<span class="pill pill-gray" style="color:var(--gray-400);font-style:italic">Unassigned</span>`
     : r._alreadyAssigned
       ? `<span class="pill pill-gray">${r["Assigned To"]}</span>`
       : `<span class="pill pill-blue">${r["Assigned To"]}</span>`;
   const rowClass = r._addOn ? "addon-row"
+    : r._neglected ? "attention-row"
+    : r._undocumented ? "undoc-row"
     : r._needsReview ? "review-row"
     : r._unassigned ? "unassigned-row"
     : (r._nonWorkable ? "nonworkable-row" : (r._overdue ? "overdue-row" : ""));
@@ -1618,7 +1923,7 @@ function rowHtml(r) {
     : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
 
   return `<tr class="${rowClass}">
-    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${reviewBadge}${contBadge}${vipUnmetBadge}${langUnmetBadge}${nwBadge}${cancelBadge}</td>
+    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${neglBadge}${undocBadge}${missBadge}${reviewBadge}${contBadge}${vipUnmetBadge}${langUnmetBadge}${nwBadge}${cancelBadge}</td>
     <td>${typeCell}${noDateBadge}${awaitBadge}</td>
     <td>${r["Case Number"]}</td>
     <td><span class="pill ${prodCls}">${r["Integration / Product"]}</span>${r._productDerived ? `<span class="pill pill-gray" style="margin-left:3px;font-size:9px" title="Product Name was blank in the report — recovered from the subject line. Worth a spot-check.">from subject</span>` : ""}</td>
@@ -1632,6 +1937,7 @@ function rowHtml(r) {
     <td>${backlogCell}</td>
     <td>${statusCell(r["Backlog Sub Status"])}</td>
     <td>${langPill}</td>
+    <td>${touchCell}</td>
     <td style="max-width:200px;font-size:11px;color:var(--gray-700);">
       ${r["Latest Comment"] ? `<span title="${r["Latest Comment"].replace(/"/g,'&quot;')}">${r["Latest Comment"].length > 70 ? r["Latest Comment"].slice(0,70)+"…" : r["Latest Comment"]}</span>` : ""}
     </td>
@@ -1649,9 +1955,9 @@ function renderInstallerView(tbody, rows) {
   const sortedKeys = Object.keys(groups).sort();
   tbody.innerHTML = sortedKeys.map(key => {
     const g = groups[key];
-    const hdr = `<tr class="installer-group-hdr"><td colspan="15">📅 ${g.installer} &mdash; ${g.date} <span style="font-weight:400;color:var(--gray-400)">(${g.rows.length} case${g.rows.length>1?"s":""})</span></td></tr>`;
+    const hdr = `<tr class="installer-group-hdr"><td colspan="16">📅 ${g.installer} &mdash; ${g.date} <span style="font-weight:400;color:var(--gray-400)">(${g.rows.length} case${g.rows.length>1?"s":""})</span></td></tr>`;
     return hdr + g.rows.map(r => rowHtml(r)).join("");
-  }).join("") || `<tr><td colspan="15" class="no-data">No cases match the current filters.</td></tr>`;
+  }).join("") || `<tr><td colspan="16" class="no-data">No cases match the current filters.</td></tr>`;
 }
 
 function setPageSize(val) {
@@ -1739,9 +2045,12 @@ function uSortBy(col) {
 function exportCSV(filteredOnly) {
   const rows = filteredOnly ? filteredRows : lastAssignments;
   if (!rows.length) return;
-  const cols = ["Assigned To","Case Type","Case Number","Integration / Product","Account Name","Segment","Account Processing","Created By","Install Date","Installer","Status","Sub Status","Parent Status","Parent Backlog Status","Backlog Sub Status","Preferred Language","Latest Comment","Last Processing Date"];
+  const cols = ["Assigned To","Case Type","Case Number","Integration / Product","Account Name","Segment","Account Processing","Created By","Install Date","Installer","Status","Sub Status","Parent Status","Parent Backlog Status","Backlog Sub Status","Preferred Language","Last Touch","Days Since Update","Last Modified By","Latest Comment","Last Processing Date"];
   const reviewFlag = r => {
     const f = [];
+    if (r._neglected)    f.push("NEGLECTED — untouched for " + r._staleDays + " business days");
+    if (r._undocumented) f.push("UNDOCUMENTED — edited by " + (r["Last Modified By"]||"someone") + " with no Latest Update written");
+    if (r._missingNote)  f.push("MISSING NOTE — none written and one is due (" + (r._noteDueReason||"") + ")");
     if (r._addOn)     f.push("ADD-ON — priority");
     if (r._needsReview) f.push("NEEDS REVIEW — " + (r._typeReason||"no activation subject"));
     if (r._continuityBroken) f.push("Account split — a hard rule moved this off the account's existing specialist");
