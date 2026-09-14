@@ -287,6 +287,7 @@
     <div class="legend-row"><span class="pill" style="background:#7C2D12;color:#fff;font-size:9px">⏳ untouched</span> Nobody opened it in 4 bus. days</div>
     <div class="legend-row"><span class="pill" style="background:#0F766E;color:#fff;font-size:9px">✎ no note logged</span> Worked, but not written up</div>
     <div class="legend-row"><span class="pill" style="background:#92400E;color:#fff;font-size:9px">📋 note due</span> Install close/past, no note</div>
+    <div class="legend-row"><span class="pill pill-teal" style="font-size:9px">⏸ awaiting impl.</span> Parent mid-build — parked, not late</div>
   </div>
 </aside>
 
@@ -372,6 +373,25 @@ const NOTE_EXPECTED_WITHIN = 5;
 // Backlog Sub Status values that mean the specialist genuinely can't act.
 // These are excluded from all three attention flags, same as Non-Workable.
 const BACKLOGGED_SUB = new Set(["pending parent case", "product gap/oversold"]);
+
+// Parent-case stages that mean implementation is still running. While the
+// parent sits in one of these and no install date has been set, the
+// integration case is legitimately parked — the account is being built out on
+// other equipment, and this case gets assigned once an install date lands.
+// Chasing anyone over it would be wrong, so it suppresses all three flags.
+const PARENT_IN_FLIGHT = new Set([
+  "menu consultation",
+  "account enrollment",
+  "pre-install verification",
+  "onboarding",
+  "menu build",
+  "installation",
+]);
+function isAwaitingImplementation(parentStatus, installDate) {
+  if (!PARENT_IN_FLIGHT.has(String(parentStatus||"").toLowerCase().trim())) return false;
+  const d = String(installDate||"").trim();
+  return !d || d === "nan" || d === "None";
+}
 
 // Integration and system users. A Last Modified Date bumped by one of these is
 // not a person working the case, so it can't count as undocumented activity.
@@ -796,9 +816,12 @@ function businessDaysForward(from, n) {
 // A note without a leading date ("unable to find location, still digging") is
 // treated as present but undated — it tells us a human wrote something, so it
 // never counts as undocumented, and we measure recency from Last Modified.
-function activityFlags(r, cutoff, now, hasModifiedByCol) {
+function activityFlags(r, cutoff, now, hasModifiedByCol, isReview) {
+  // Parked while the parent case finishes implementation — not a problem.
+  const awaiting   = isAwaitingImplementation(r[COL.PARENT_STATUS], r[COL.INSTALL_DATE]);
   const blocked    = isNonWorkableFn(String(r[COL.PARENT_BACKLOG]||"")) ||
-                     isBackloggedFn(String(r[COL.BACKLOG_SUB]||""));
+                     isBackloggedFn(String(r[COL.BACKLOG_SUB]||"")) ||
+                     awaiting;
   const noteText   = String(r[COL.LATEST_COMMENT]||"").trim();
   const noteDate   = latestUpdateDate(noteText);
   const modDate    = parseDate(String(r[COL.LAST_MODIFIED]||""));
@@ -820,10 +843,12 @@ function activityFlags(r, cutoff, now, hasModifiedByCol) {
   const today0     = new Date(now.getTime()); today0.setHours(0,0,0,0);
   const processing = !!String(r[COL.LAST_PROCESSING]||"").trim();
   const noteDue    = (inst && inst < today0) || (inst && inst <= soon) || processing;
-  const missingNote = !blocked && !noteText && noteDue;
+  // Review cases have their own bucket. Counting them here too would double-
+  // report fresh email and support intake as a documentation failure.
+  const missingNote = !blocked && !isReview && !noteText && noteDue;
 
   return {
-    blocked, neglected, undocumented, missingNote,
+    blocked, awaiting, neglected, undocumented, missingNote,
     staleDays, noteDate, modDate, modBy,
     noNote: !noteText,
     undatedNote: !!noteText && !noteDate,
@@ -1035,6 +1060,7 @@ function runAssignments() {
       "_neglected":               false,
       "_undocumented":            false,
       "_missingNote":             false,
+      "_awaitingImpl":            isAwaitingImplementation(r[COL.PARENT_STATUS], r[COL.INSTALL_DATE]),
       "_staleDays":               (() => { const t = lastTouchDate(r); return t ? businessDaysBetween(t, now) : null; })(),
       "_noUpdateLogged":          !String(r[COL.LATEST_COMMENT]||"").trim(),
       "_backlogged":              isBackloggedFn(String(r[COL.BACKLOG_SUB]||"")),
@@ -1074,7 +1100,7 @@ function runAssignments() {
     // Only cases that already have an owner in Salesforce are eligible for
     // Neglected and Undocumented; a case assigned by this run has only just
     // landed with someone, so there's nothing to chase yet.
-    const af          = activityFlags(r, staleCutoff, now, hasModifiedByCol);
+    const af          = activityFlags(r, staleCutoff, now, hasModifiedByCol, clsA.needsReview);
     const backlogged  = af.blocked;
     const staleDays   = af.staleDays;
     const noUpdateLog = af.noNote;
@@ -1110,6 +1136,7 @@ function runAssignments() {
       "_neglected":               af.neglected,
       "_undocumented":            af.undocumented,
       "_missingNote":             af.missingNote,
+      "_awaitingImpl":            af.awaiting,
       "_noteDueReason":           af.noteDueReason,
       "_undatedNote":             af.undatedNote,
       "_modifiedAfterNote":       af.modifiedAfterNote,
@@ -1142,7 +1169,7 @@ function runAssignments() {
       const ps = String(r[COL.PARENT_STATUS]||"").trim();
       const hasInstall = inst && inst !== "nan" && inst !== "None";
       const clsU = r._cls || classifyCase(r, processingAccounts);
-      const afU  = activityFlags(r, staleCutoff, now, hasModifiedByCol);
+      const afU  = activityFlags(r, staleCutoff, now, hasModifiedByCol, clsU.needsReview);
       unassigned.push({
         "Assigned To":           clsU.needsReview ? "— Needs Review —" : "— Unassigned —",
         "Case Number":           caseNum,
@@ -1175,6 +1202,7 @@ function runAssignments() {
         "_undocumented":         false,
         "_missingNote":          afU.missingNote,
         "_needsAttention":       afU.missingNote,
+        "_awaitingImpl":         afU.awaiting,
         "_noteDueReason":        afU.noteDueReason,
         "_staleDays":            afU.staleDays,
         "_noUpdateLogged":       afU.noNote,
@@ -1294,6 +1322,7 @@ function renderAll() {
         <option value="undocumented" ${fOverdue==="undocumented"?"selected":""}>✎ Undocumented (worked, no note)</option>
         <option value="missingnote"  ${fOverdue==="missingnote"?"selected":""}>📋 Missing note (note is due)</option>
         <option value="anyattention" ${fOverdue==="anyattention"?"selected":""}>Any of the three above</option>
+        <option value="awaitingimpl" ${fOverdue==="awaitingimpl"?"selected":""}>⏸ Awaiting implementation (parked)</option>
         <option value="overdue"      ${fOverdue==="overdue"?"selected":""}>📅 Past install date</option>
         <option value="noupdate"     ${fOverdue==="noupdate"?"selected":""}>No note ever written</option>
         <option value="upcoming"     ${fOverdue==="upcoming"?"selected":""}>Upcoming install only</option>
@@ -1385,10 +1414,11 @@ function renderAddOnBanner() {
 // Grouped by owner, because chasing these is a per-person conversation.
 // ─────────────────────────────────────────────
 function renderAttentionBanner() {
-  const neg  = lastAssignments.filter(r => r._neglected);
-  const und  = lastAssignments.filter(r => r._undocumented);
-  const mis  = lastAssignments.filter(r => r._missingNote);
-  if (!neg.length && !und.length && !mis.length) return "";
+  const neg    = lastAssignments.filter(r => r._neglected);
+  const und    = lastAssignments.filter(r => r._undocumented);
+  const mis    = lastAssignments.filter(r => r._missingNote);
+  const parked = lastAssignments.filter(r => r._awaitingImpl).length;
+  if (!neg.length && !und.length && !mis.length && !parked) return "";
 
   const ownerBlock = (rows, colour) => {
     const byOwner = {};
@@ -1431,7 +1461,17 @@ function renderAttentionBanner() {
     ${section(mis, "#92400E", "#FEF7E7", "📋", `case${mis.length>1?"s":""} with a note now due`,
       `No Latest Update has ever been written, and these are far enough along that one is expected —
        the install date has passed or is within ${NOTE_EXPECTED_WITHIN} business days, or the account is already processing.
-       Cases with a distant install date are deliberately left out; nothing is late about those yet.`)}`;
+       Cases with a distant install date are deliberately left out; nothing is late about those yet.`)}
+    ${parked ? `<div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;
+        background:var(--teal-light);border:1px solid var(--teal);border-radius:var(--radius);
+        padding:9px 14px;margin-bottom:16px;font-size:12px;color:var(--teal)">
+      <strong>⏸ ${parked.toLocaleString()} parked</strong>
+      <span>Parent case still in Onboarding, Menu Consultation, Menu Build, Account Enrollment,
+      Pre-Install Verification or Installation with no install date — the account is being built out on other
+      equipment, so these are held out of the flags above and assigned once a date lands.</span>
+      <a href="#" onclick="event.preventDefault();document.getElementById('f-overdue').value='awaitingimpl';applyFilters();"
+         style="color:var(--teal);font-weight:700;white-space:nowrap">Review them →</a>
+    </div>` : ""}`;
 }
 
 // ─────────────────────────────────────────────
@@ -1765,6 +1805,7 @@ function applyFilters() {
     if (fOverdue === "undocumented" && !r._undocumented) return false;
     if (fOverdue === "missingnote"  && !r._missingNote)  return false;
     if (fOverdue === "anyattention" && !r._needsAttention) return false;
+    if (fOverdue === "awaitingimpl" && !r._awaitingImpl)   return false;
     if (fOverdue === "noupdate"     && !r._noUpdateLogged) return false;
     if (fOverdue === "upcoming"  && r._overdue)  return false;
     if (fNonWorkable === "nonworkable" && !r._nonWorkable)               return false;
@@ -1882,7 +1923,9 @@ function rowHtml(r) {
     ? `<span class="pill pill-teal" style="margin-left:4px;font-size:9px" title="This account already has integration work in flight.">Processing</span>` : "";
   const noDateBadge = r._addOn && r._noInstallDate
     ? `<span class="pill pill-gray" style="margin-left:4px;font-size:9px" title="Add-on — no installer visit needed, so no install date is expected.">no install date</span>` : "";
-  const awaitBadge = r._awaitingInstall
+  const awaitBadge = r._awaitingImpl
+    ? `<span class="pill pill-teal" style="margin-left:4px;font-size:9px" title="Parent case is still in ${r["Parent Status"]||"implementation"} with no install date set. The account is being built out on other equipment — this case gets assigned once an install date lands, so it isn't flagged as neglected.">⏸ awaiting implementation</span>`
+    : r._awaitingInstall
     ? `<span class="pill pill-gray" style="margin-left:4px;font-size:9px" title="Waiting on an install date before it can be assigned.">awaiting install date</span>` : "";
   const contBadge = r._continuityBroken
     ? `<span class="pill pill-yellow" style="margin-left:4px" title="This account already had a specialist, but the VIP/A or language rule moved this case to someone else. The account is now split — you may want to consolidate.">⚠ account split</span>` : "";
@@ -2051,6 +2094,7 @@ function exportCSV(filteredOnly) {
     if (r._neglected)    f.push("NEGLECTED — untouched for " + r._staleDays + " business days");
     if (r._undocumented) f.push("UNDOCUMENTED — edited by " + (r["Last Modified By"]||"someone") + " with no Latest Update written");
     if (r._missingNote)  f.push("MISSING NOTE — none written and one is due (" + (r._noteDueReason||"") + ")");
+    if (r._awaitingImpl) f.push("Awaiting implementation — parent is in " + (r["Parent Status"]||"an active stage") + " with no install date");
     if (r._addOn)     f.push("ADD-ON — priority");
     if (r._needsReview) f.push("NEEDS REVIEW — " + (r._typeReason||"no activation subject"));
     if (r._continuityBroken) f.push("Account split — a hard rule moved this off the account's existing specialist");
