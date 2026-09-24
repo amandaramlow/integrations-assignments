@@ -387,6 +387,29 @@ const PARENT_IN_FLIGHT = new Set([
   "menu build",
   "installation",
 ]);
+const SPANISH_VALUES = new Set(["spanish", "español", "espanol", "es"]);
+function isSpanishPref(v) { return SPANISH_VALUES.has(String(v||"").toLowerCase().trim()); }
+
+// Most cases one specialist will take for a single brand before the rest of
+// that brand's work is allowed to spill over to someone else. Stops a
+// ten-location chain landing entirely on one person.
+const BRAND_CASE_CAP = 8;
+
+// A DBA can hold several locations, each its own Account Name:
+//   "Castaneda's Mexican Food - Yucca Valley" → "castanedas mexican food"
+// The location suffix is only stripped when the dash is FOLLOWED BY A SPACE,
+// which keeps genuinely hyphenated names whole — "80-80 Taqueria",
+// "Fajitas Tex-Mex" and "Nana's Chicken-N-Waffles" all stay as they are.
+function brandKey(accountName) {
+  const s = String(accountName||"").trim();
+  if (!s) return "";
+  return s.toLowerCase()
+          .replace(/\s*[-–—]\s+.*$/, "")
+          .replace(/[^a-z0-9 ]/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+}
+
 function isAwaitingImplementation(parentStatus, installDate) {
   if (!PARENT_IN_FLIGHT.has(String(parentStatus||"").toLowerCase().trim())) return false;
   const d = String(installDate||"").trim();
@@ -533,6 +556,10 @@ let team = loadTeam();
 let departed = loadDeparted();
 let reportRows = null;
 let lastAssignments = [], lastWorkload = [], lastOooCases = [], lastUnassigned = [];
+// Accounts where ANY case is Spanish-preferred. Language belongs to the
+// merchant, not the individual case, so one Spanish case makes the whole
+// account Spanish and every case on it routes to a bilingual specialist.
+let spanishAccounts = new Set();
 let uFilterProduct = "all", uFilterText = "";
 let filteredRows = [];
 let sortCol = null, sortAsc = true, currentPage = 1;
@@ -926,6 +953,16 @@ function runAssignments() {
     const acct = String(r[COL.ACCOUNT]||"").trim();
     if (acct && String(r[COL.LAST_PROCESSING]||"").trim()) processingAccounts.add(acct);
   });
+
+  // Language is an attribute of the merchant, not of one case. If any case on
+  // an account is Spanish-preferred, every case on that account needs a
+  // bilingual specialist — otherwise a merchant who asked to be spoken to in
+  // Spanish ends up with two people, one of whom can't.
+  spanishAccounts = new Set();
+  reportRows.forEach(r => {
+    const acct = String(r[COL.ACCOUNT]||"").trim();
+    if (acct && isSpanishPref(r[COL.PREF_LANG])) spanishAccounts.add(acct);
+  });
   [...alreadyDone, ...oooCases].forEach(r => {
     const acct = String(r[COL.ACCOUNT]||"").trim();
     if (acct) processingAccounts.add(acct);
@@ -970,20 +1007,50 @@ function runAssignments() {
   // a VIP account and a standard account on the same installer/day get split.
   const instKey = (inst, date, isVip) => inst + "|" + date + "|" + (isVip ? "VIP" : "STD");
 
-  // Seed from already-assigned
-  const accountToSpec = {}, instdayToSpec = {};
+  // ── Seed continuity from what Salesforce already shows ──
+  // Three keys, strongest first: the exact account, then the brand (all
+  // locations of one merchant), then the installer's day.
+  const accountToSpec = {}, brandToSpec = {}, instdayToSpec = {};
+  const brandLoad = {};            // brand -> specialist -> case count
+  const bump = (b, spec) => { if (!b) return; (brandLoad[b] = brandLoad[b] || {})[spec] = (brandLoad[b]?.[spec] || 0) + 1; };
+
+  // Who owns each account in Salesforce right now, specialist or not — used to
+  // spot accounts already split, and ones parked with someone off the team.
+  const acctOwnersSF = {}, brandOwnersSF = {};
   alreadyDone.forEach(r => {
     const acct = String(r[COL.ACCOUNT]||"").trim();
+    const br   = brandKey(acct);
+    const own  = String(r[COL.OWNER]||"").trim();
+    if (!own) return;
+    if (acct) (acctOwnersSF[acct] = acctOwnersSF[acct] || {})[own] = (acctOwnersSF[acct][own]||0) + 1;
+    if (br)   (brandOwnersSF[br]  = brandOwnersSF[br]  || {})[own] = (brandOwnersSF[br][own]||0) + 1;
+  });
+
+  alreadyDone.forEach(r => {
+    const acct = String(r[COL.ACCOUNT]||"").trim();
+    const br    = brandKey(acct);
     const inst  = String(r[COL.INSTALLER]||"").trim();
     const date  = String(r[COL.INSTALL_DATE]||"").trim();
     const vipR  = isVipSegment(r[COL.SEGMENT]);
     const m = matchOwner(r[COL.OWNER], specNames);
     if (!m) return;
     if (acct && acct !== "nan") accountToSpec[acct] = accountToSpec[acct] || m;
+    if (br) { brandToSpec[br] = brandToSpec[br] || m; bump(br, m); }
     if (inst && inst !== "nan" && date && date !== "nan") {
       const k = instKey(inst, date, vipR);
       instdayToSpec[k] = instdayToSpec[k] || m;
     }
+  });
+
+  // Brands already split across more than one owner in Salesforce. We don't
+  // move anyone's existing cases — we surface them so they can be consolidated,
+  // suggesting whoever already holds the most as the keeper.
+  const preSplitBrands = {};
+  Object.entries(brandOwnersSF).forEach(([br, owners]) => {
+    const names = Object.keys(owners);
+    if (names.length < 2) return;
+    const keeper = names.sort((a,b) => owners[b] - owners[a] || a.localeCompare(b))[0];
+    preSplitBrands[br] = { owners, keeper };
   });
 
   // Assign — add-ons go first (they are the highest priority and must move
@@ -997,8 +1064,8 @@ function runAssignments() {
     const account  = String(r[COL.ACCOUNT]||"").trim();
     const inst     = String(r[COL.INSTALLER]||"").trim();
     const date     = String(r[COL.INSTALL_DATE]||"").trim();
-    const lang     = String(r[COL.PREF_LANG]||"").trim().toLowerCase();
-    const needsBil = ["spanish","español","es"].includes(lang);
+    // Account-level, not per case — see spanishAccounts above.
+    const needsBil = account ? spanishAccounts.has(account) : isSpanishPref(r[COL.PREF_LANG]);
     const overdue  = isOverdue(date);
     const segment  = String(r[COL.SEGMENT]||"").trim();
     const isVip    = isVipSegment(segment);
@@ -1006,7 +1073,17 @@ function runAssignments() {
     const isAddOn  = cls.isAddOn;
     const k        = instKey(inst, date, isVip);
 
+    const brand = brandKey(account);
+
+    // Continuity, strongest key first: exact account, then the brand's other
+    // locations, then the installer's day.
     let assigned = accountToSpec[account] || null;
+    let brandCapped = false;
+    if (!assigned && brand && brandToSpec[brand]) {
+      const cand = brandToSpec[brand];
+      if ((brandLoad[brand]?.[cand] || 0) < BRAND_CASE_CAP) assigned = cand;
+      else brandCapped = true;         // this brand has filled their share
+    }
     const inherited = assigned;          // the specialist already on this account
     if (!assigned && inst && inst !== "nan") assigned = instdayToSpec[k] || null;
     if (assigned && !specNames.includes(assigned)) assigned = null;
@@ -1023,8 +1100,15 @@ function runAssignments() {
     // so this account is now split across two specialists — worth a look.
     const continuityBroken = !!inherited && inherited !== assigned;
 
+    // The account's existing Salesforce owner isn't one of our specialists, so
+    // this new case lands elsewhere and the account is now shared.
+    const sfOwners    = Object.keys(acctOwnersSF[account] || {});
+    const offTeamOwner = sfOwners.find(o => !matchOwner(o, specNames)) || "";
+    const offTeamSplit = !!offTeamOwner && !sfOwners.some(o => matchOwner(o, specNames));
+
     newCounts[assigned]++;
     if (account && account !== "nan") accountToSpec[account] = accountToSpec[account] || assigned;
+    if (brand) { brandToSpec[brand] = brandToSpec[brand] || assigned; bump(brand, assigned); }
     if (inst && inst !== "nan") instdayToSpec[k] = instdayToSpec[k] || assigned;
 
     const parentBacklog = String(r[COL.PARENT_BACKLOG]||"").trim();
@@ -1071,6 +1155,12 @@ function runAssignments() {
       "_needsReview":             false,
       "_noInstallDate":           !date || date === "nan" || date === "None",
       "_continuityBroken":        continuityBroken,
+      "_brandCapped":             brandCapped,
+      "_offTeamSplit":            offTeamSplit,
+      "_offTeamOwner":            offTeamOwner,
+      "_brand":                   brand,
+      "_preSplit":                !!preSplitBrands[brand],
+      "_preSplitKeeper":          preSplitBrands[brand] ? preSplitBrands[brand].keeper : "",
       "_nonWorkable":             isNonWorkableFn(parentBacklog),
       "_cancelled":               isCancelledFn(String(r[COL.PARENT_STATUS]||"")),
     });
@@ -1106,7 +1196,18 @@ function runAssignments() {
     const noUpdateLog = af.noNote;
     const attention   = af.neglected || af.undocumented || af.missingNote;
 
-    if (!overdue && !nonWorkable && !cancelled && !clsA.isAddOn && !clsA.needsReview && !attention) return;
+    const acctA     = String(r[COL.ACCOUNT]||"").trim();
+    const brandA    = brandKey(acctA);
+    const preSplitA = preSplitBrands[brandA];
+
+    // A Spanish merchant sitting with a specialist who isn't bilingual. Only
+    // raised for owners we actually know about — an off-team owner's language
+    // skills aren't ours to assume.
+    const ownerA      = matchOwner(r[COL.OWNER], specNames);
+    const langMismatch = !!ownerA && spanishAccounts.has(acctA) && !bilingualSet.has(ownerA);
+
+    if (!overdue && !nonWorkable && !cancelled && !clsA.isAddOn && !clsA.needsReview
+        && !attention && !preSplitA && !langMismatch) return;
     flaggedAssigned.push({
       "Assigned To":              String(r[COL.OWNER]||"").trim(),
       "Case Number":              String(r[COL.CASE_NUM]||"").trim(),
@@ -1149,6 +1250,10 @@ function runAssignments() {
       "_processing":              clsA.processing,
       "_needsReview":             clsA.needsReview,
       "_noInstallDate":           !date || date === "nan" || date === "None",
+      "_brand":                   brandA,
+      "_preSplit":                !!preSplitA,
+      "_preSplitKeeper":          preSplitA ? preSplitA.keeper : "",
+      "_langMismatch":            langMismatch,
       "_alreadyAssigned":         true,
       "_nonWorkable":             nonWorkable,
       "_cancelled":               cancelled,
@@ -1261,6 +1366,8 @@ function renderAll() {
 
   scroll.innerHTML = `
     ${renderAddOnBanner()}
+    ${renderLanguageBanner()}
+    ${renderSplitBanner()}
     ${renderAttentionBanner()}
     ${lastOooCases.length ? renderOooWarning() : ""}
     ${renderReviewBanner()}
@@ -1315,6 +1422,7 @@ function renderAll() {
         <option value="all">All languages</option>
         <option value="spanish" ${fLang==="spanish"?"selected":""}>Spanish</option>
         <option value="english" ${fLang==="english"?"selected":""}>English</option>
+        <option value="mismatch" ${fLang==="mismatch"?"selected":""}>🗣 Spanish with non-bilingual owner</option>
       </select>
       <select id="f-overdue" onchange="applyFilters()">
         <option value="all">All dates &amp; activity</option>
@@ -1406,6 +1514,91 @@ function renderAddOnBanner() {
           ${r["Case Number"]} · ${r["Account Name"]} → ${r["Assigned To"]}</span>`).join("")}
       </div>
       ${addons.length > 40 ? `<p style="color:#9A3412;margin-top:4px">…and ${addons.length-40} more — use the ⚡ Add-Ons card to filter.</p>` : ""}
+    </div>`;
+}
+
+// ─────────────────────────────────────────────
+// LANGUAGE-MISMATCH BANNER
+// Spanish merchants sitting with a specialist who isn't bilingual. New work
+// already routes correctly — these are the ones Salesforce got before the rule
+// existed, and moving them is a change you make there.
+// ─────────────────────────────────────────────
+function renderLanguageBanner() {
+  const rows = lastAssignments.filter(r => r._langMismatch);
+  if (!rows.length) return "";
+  const byOwner = {};
+  rows.forEach(r => { (byOwner[r["Assigned To"]] = byOwner[r["Assigned To"]] || []).push(r); });
+  const accounts = new Set(rows.map(r => r["Account Name"])).size;
+  const owners = Object.entries(byOwner).sort((a,b) => b[1].length - a[1].length);
+
+  return `
+    <div class="warning-banner" style="background:#ECFDF5;border-color:#065F46">
+      <h3 style="color:#065F46">🗣 ${accounts} Spanish-preferred merchant${accounts>1?"s":""} with a non-bilingual specialist</h3>
+      <p style="color:#065F46">
+        ${rows.length} case${rows.length>1?"s":""} across ${accounts} account${accounts>1?"s":""}.
+        New work already routes to bilingual specialists — these predate the rule. Nothing has been moved;
+        reassigning them is a change in Salesforce. If someone here does speak Spanish, flag them
+        <strong>Bil</strong> in Team Settings and they'll drop off this list on the next run.
+      </p>
+      ${owners.map(([name, list]) => {
+        const accts = [...new Set(list.map(r => r["Account Name"]))];
+        return `<div style="margin-bottom:6px">
+          <strong>${name}</strong>
+          <span class="mbadge" style="background:#065F46;color:#fff;margin-left:4px">${accts.length} account${accts.length>1?"s":""}</span>
+          <div class="warning-case-list" style="margin-top:3px">
+            ${accts.slice(0,12).map(a => `<span class="warning-case" style="border-color:#065F46;color:#065F46">${a}</span>`).join("")}
+            ${accts.length>12?`<span class="warning-case" style="border-color:#065F46;color:#065F46">+${accts.length-12} more</span>`:""}
+          </div>
+        </div>`;
+      }).join("")}
+    </div>`;
+}
+
+// ─────────────────────────────────────────────
+// SPLIT-MERCHANT BANNER
+// Merchants sitting with more than one owner. Nothing is moved automatically —
+// consolidating is a Salesforce change, so this just makes them findable.
+// ─────────────────────────────────────────────
+function renderSplitBanner() {
+  const byBrand = {};
+  lastAssignments.forEach(r => {
+    const o = r["Assigned To"];
+    if (!o || o.startsWith("—") || !r._brand) return;
+    (byBrand[r._brand] = byBrand[r._brand] || { rows: [], label: r["Account Name"] }).rows.push(r);
+  });
+  const split = Object.entries(byBrand)
+    .map(([b, g]) => {
+      const owners = {};
+      g.rows.forEach(r => { owners[r["Assigned To"]] = (owners[r["Assigned To"]]||0) + 1; });
+      return { brand: b, label: g.label, rows: g.rows, owners,
+               locations: new Set(g.rows.map(r => r["Account Name"])).size,
+               keeper: g.rows.find(r => r._preSplitKeeper)?._preSplitKeeper || "" };
+    })
+    .filter(x => Object.keys(x.owners).length > 1)
+    .sort((a,b) => b.rows.length - a.rows.length);
+  if (!split.length) return "";
+
+  const offTeam = lastAssignments.filter(r => r._offTeamSplit).length;
+
+  return `
+    <div class="warning-banner" style="background:#FFF7ED;border-color:#B45309">
+      <h3 style="color:#B45309">⚑ ${split.length} merchant${split.length>1?"s":""} split across more than one person</h3>
+      <p style="color:#B45309">
+        New work is grouped by merchant, so these are cases that were already split in Salesforce before the run,
+        or that a hard rule pulled apart. Nothing has been moved — consolidating is a change you make in Salesforce.
+        The suggested keeper is whoever already holds the most.
+        ${offTeam ? ` ${offTeam} case${offTeam>1?"s":""} landed on an account whose existing owner isn't an active specialist.` : ""}
+      </p>
+      ${split.slice(0,25).map(x => `<div style="margin-bottom:6px">
+        <strong>${x.label.replace(/\s*[-–—]\s+.*$/,"")}</strong>
+        ${x.locations > 1 ? `<span class="pill pill-gray" style="margin-left:4px;font-size:9px">${x.locations} locations</span>` : ""}
+        ${x.keeper ? `<span class="pill" style="background:#B45309;color:#fff;margin-left:4px;font-size:9px">keep with ${x.keeper}</span>` : ""}
+        <div class="warning-case-list" style="margin-top:3px">
+          ${Object.entries(x.owners).sort((a,b)=>b[1]-a[1]).map(([n,c]) =>
+            `<span class="warning-case" style="border-color:#B45309;color:#B45309">${n} · ${c} case${c>1?"s":""}</span>`).join("")}
+        </div>
+      </div>`).join("")}
+      ${split.length>25?`<p style="color:#B45309;margin:4px 0 0">…and ${split.length-25} more.</p>`:""}
     </div>`;
 }
 
@@ -1613,8 +1806,8 @@ function autoReassignOoo() {
   const prioO = r => ((r._cls && r._cls.isAddOn) ? 2 : 0) + (isVipSegment(r[COL.SEGMENT]) ? 1 : 0);
   const orderedOoo = [...lastOooCases].sort((a,b) => prioO(b) - prioO(a));
   const newlyAssigned = orderedOoo.map(r => {
-    const lang    = String(r[COL.PREF_LANG]||"").toLowerCase();
-    const needBil = ["spanish","español","es"].includes(lang);
+    const acctR   = String(r[COL.ACCOUNT]||"").trim();
+    const needBil = acctR ? spanishAccounts.has(acctR) : isSpanishPref(r[COL.PREF_LANG]);
     const segment = String(r[COL.SEGMENT]||"").trim();
     const isVip   = isVipSegment(segment);
     const clsR    = r._cls || { type:T_STANDARD, reason:"", isAddOn:false, needsReview:false, processing:false };
@@ -1800,6 +1993,7 @@ function applyFilters() {
     if (fSegment !== "all" && fSegment !== "vip" && r["Segment"] !== fSegment) return false;
     if (fLang === "spanish"  && !["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
     if (fLang === "english"  && ["spanish","español","es"].includes(r["Preferred Language"].toLowerCase())) return false;
+    if (fLang === "mismatch" && !r._langMismatch) return false;
     if (fOverdue === "overdue"   && !r._overdue) return false;
     if (fOverdue === "neglected"    && !r._neglected)    return false;
     if (fOverdue === "undocumented" && !r._undocumented) return false;
@@ -1928,7 +2122,15 @@ function rowHtml(r) {
     : r._awaitingInstall
     ? `<span class="pill pill-gray" style="margin-left:4px;font-size:9px" title="Waiting on an install date before it can be assigned.">awaiting install date</span>` : "";
   const contBadge = r._continuityBroken
-    ? `<span class="pill pill-yellow" style="margin-left:4px" title="This account already had a specialist, but the VIP/A or language rule moved this case to someone else. The account is now split — you may want to consolidate.">⚠ account split</span>` : "";
+    ? `<span class="pill pill-yellow" style="margin-left:4px" title="This account already had a specialist, but the VIP/A or language rule moved this case to someone else. The account is now split — you may want to consolidate.">⚠ account split</span>`
+    : r._offTeamSplit
+    ? `<span class="pill pill-yellow" style="margin-left:4px" title="This account's existing case is owned by ${r._offTeamOwner}, who isn't an active specialist, so the new case went into the rotation. The account is now shared — you may want to pull the old case across.">⚠ owner off-team (${r._offTeamOwner})</span>`
+    : r._brandCapped
+    ? `<span class="pill pill-gray" style="margin-left:4px" title="This brand already has ${BRAND_CASE_CAP} cases with one specialist, so the rest were allowed to spill over to keep loads fair.">brand cap</span>` : "";
+  const langMisBadge = r._langMismatch
+    ? `<span class="pill" style="background:#065F46;color:#fff;margin-left:4px" title="This merchant is Spanish-preferred but the case sits with a specialist who isn't flagged bilingual. Consider moving the account to a bilingual specialist in Salesforce.">🗣 not bilingual</span>` : "";
+  const preSplitBadge = r._preSplit
+    ? `<span class="pill" style="background:#B45309;color:#fff;margin-left:4px" title="This merchant was already split across more than one owner in Salesforce before this run. Suggested keeper: ${r._preSplitKeeper}.">⚑ split in SF</span>` : "";
   const reviewBadge = r._needsReview
     ? `<span class="pill pill-red" style="margin-left:4px" title="${(r._typeReason||"").replace(/"/g,'&quot;')}">⚠ Review</span>` : "";
   const neglBadge = r._neglected
@@ -1966,7 +2168,7 @@ function rowHtml(r) {
     : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
 
   return `<tr class="${rowClass}">
-    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${neglBadge}${undocBadge}${missBadge}${reviewBadge}${contBadge}${vipUnmetBadge}${langUnmetBadge}${nwBadge}${cancelBadge}</td>
+    <td>${assignedPill}${reasgnBadge}${alreadyBadge}${neglBadge}${undocBadge}${missBadge}${reviewBadge}${langMisBadge}${preSplitBadge}${contBadge}${vipUnmetBadge}${langUnmetBadge}${nwBadge}${cancelBadge}</td>
     <td>${typeCell}${noDateBadge}${awaitBadge}</td>
     <td>${r["Case Number"]}</td>
     <td><span class="pill ${prodCls}">${r["Integration / Product"]}</span>${r._productDerived ? `<span class="pill pill-gray" style="margin-left:3px;font-size:9px" title="Product Name was blank in the report — recovered from the subject line. Worth a spot-check.">from subject</span>` : ""}</td>
@@ -2098,6 +2300,10 @@ function exportCSV(filteredOnly) {
     if (r._addOn)     f.push("ADD-ON — priority");
     if (r._needsReview) f.push("NEEDS REVIEW — " + (r._typeReason||"no activation subject"));
     if (r._continuityBroken) f.push("Account split — a hard rule moved this off the account's existing specialist");
+    if (r._offTeamSplit)     f.push("Account's existing owner is off-team (" + r._offTeamOwner + ")");
+    if (r._preSplit)         f.push("Merchant already split in Salesforce — suggested keeper " + r._preSplitKeeper);
+    if (r._langMismatch)     f.push("Spanish-preferred merchant with a non-bilingual specialist");
+    if (r._brandCapped)      f.push("Brand cap reached — allowed to spill to another specialist");
     if (r._vipUnmet)  f.push("No VIP/A specialist available");
     if (r._langUnmet) f.push("Spanish preferred — assigned specialist is not bilingual");
     if (r._awaitingInstall) f.push("Awaiting install date");
