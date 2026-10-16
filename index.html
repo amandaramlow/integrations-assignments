@@ -131,6 +131,8 @@
 
   /* ── Add-on / priority row highlight ── */
   tbody tr.addon-row { background: #fff6f1; box-shadow: inset 3px 0 0 var(--orange); }
+  tbody tr.kiosk-row { background: #f6f2ff; box-shadow: inset 3px 0 0 var(--purple); }
+  tbody tr.kiosk-row:hover { background: #ede6ff; }
   tbody tr.addon-row:hover { background: #ffeee5; }
   tbody tr.review-row { background: #fdf4f4; box-shadow: inset 3px 0 0 var(--red); }
   tbody tr.review-row:hover { background: #fbeaea; }
@@ -307,6 +309,7 @@
     <div class="stat-grid" id="stat-grid" style="display:none">
       <div class="stat-card clickable" id="sc-new"      onclick="statFilter('new')"><div class="lbl">New Assigned</div><div class="val" id="s-total">0</div><div class="sub">this run</div></div>
       <div class="stat-card prio clickable" id="sc-addon" onclick="statFilter('addon')"><div class="lbl">⚡ Add-Ons</div><div class="val" id="s-addon">0</div><div class="sub">top priority</div></div>
+      <div class="stat-card prio clickable" id="sc-kiosk" onclick="statFilter('kiosk')"><div class="lbl">🚀 Reddie / Kiosk / Opera</div><div class="val" id="s-kiosk">0</div><div class="sub">flagged · assigned on creation</div></div>
       <div class="stat-card warn clickable" id="sc-review" onclick="statFilter('review')"><div class="lbl">Needs Review</div><div class="val" id="s-review">0</div><div class="sub">not auto-assigned</div></div>
       <div class="stat-card"           id="sc-accounts"                              ><div class="lbl">Accounts</div><div class="val" id="s-accounts">0</div><div class="sub">unique</div></div>
       <div class="stat-card clickable" id="sc-spanish"  onclick="statFilter('spanish')"><div class="lbl">Spanish</div><div class="val" id="s-spanish">0</div><div class="sub">bilingual routed</div></div>
@@ -457,6 +460,22 @@ const T_ADDON_LIKELY    = "Add-On?";
 const T_NEW_INSTALL     = "New Install";
 const T_STANDARD        = "Standard";
 const T_REVIEW          = "Review";
+const T_KIOSK           = "Fast-Track";
+
+// Fast-track products: Reddie, SpotOn Kiosk (Reddie is being white-labelled into
+// it) and Opera (new). Treated the same for now: assigned the moment the case exists (no install-date
+// gate), never parked, and flagged on every row. The Product Name is the
+// reliable signal — the subject may say "Reddie" for both.
+const FASTTRACK_RE = /reddie|kiosk|\bopera\b/;
+function isKioskProduct(r) {
+  const p = String(r[COL.PRODUCT]||"").toLowerCase();
+  if (p && !r._productDerived) return FASTTRACK_RE.test(p);
+  return FASTTRACK_RE.test(p + " " + String(r[COL.SUBJECT]||"").toLowerCase());
+}
+function kioskBrand(r) {
+  const p = String(r[COL.PRODUCT]||"").toLowerCase();
+  return /opera/.test(p) ? "Opera" : /kiosk/.test(p) ? "SpotOn Kiosk" : "Reddie";
+}
 
 function hasActivationSubject(s) {
   return String(s||"").toLowerCase().includes("integrations activations");
@@ -469,6 +488,12 @@ function classifyCase(r, processingAccounts) {
   const account = String(r[COL.ACCOUNT]||"").trim();
   const hasLPD  = !!String(r[COL.LAST_PROCESSING]||"").trim();
   const processing = hasLPD || (processingAccounts && processingAccounts.has(account));
+
+  // Reddie / SpotOn Kiosk: assign on creation, whatever the subject or creator.
+  if (isKioskProduct(r)) {
+    return { type: T_KIOSK, reason: kioskBrand(r) + " — new integration, assigned on creation and flagged",
+             isAddOn: false, isKiosk: true, needsReview: false, processing };
+  }
 
   // Subject without "Integrations Activations" is always a review case —
   // these are the replies, transfers and support tickets, and we have no SKU.
@@ -510,6 +535,7 @@ function typePillClass(t) {
   if (t === T_ADDON_LIKELY)    return "pill-yellow";
   if (t === T_REVIEW)          return "pill-red";
   if (t === T_NEW_INSTALL)     return "pill-blue";
+  if (t === T_KIOSK)           return "pill-purple";
   return "pill-gray";
 }
 const DEFAULT_TEAM = [
@@ -546,6 +572,7 @@ function productClass(prod) {
   if (p.includes("deliverect")) return "prod-deliverect";
   if (p.includes("popmenu") || p.includes("pop menu"))   return "prod-popmenu";
   if (p.includes("reddie"))     return "prod-reddie";
+  if (p.includes("kiosk") || p.includes("opera")) return "prod-reddie";
   return "pill-gray";
 }
 
@@ -843,9 +870,9 @@ function businessDaysForward(from, n) {
 // A note without a leading date ("unable to find location, still digging") is
 // treated as present but undated — it tells us a human wrote something, so it
 // never counts as undocumented, and we measure recency from Last Modified.
-function activityFlags(r, cutoff, now, hasModifiedByCol, isReview) {
+function activityFlags(r, cutoff, now, hasModifiedByCol, isReview, isKiosk) {
   // Parked while the parent case finishes implementation — not a problem.
-  const awaiting   = isAwaitingImplementation(r[COL.PARENT_STATUS], r[COL.INSTALL_DATE]);
+  const awaiting   = !isKiosk && isAwaitingImplementation(r[COL.PARENT_STATUS], r[COL.INSTALL_DATE]);
   const blocked    = isNonWorkableFn(String(r[COL.PARENT_BACKLOG]||"")) ||
                      isBackloggedFn(String(r[COL.BACKLOG_SUB]||"")) ||
                      awaiting;
@@ -980,7 +1007,7 @@ function runAssignments() {
     const hasInstall = inst && inst !== "nan" && inst !== "None" && inst !== "";
     const cls = r._cls;
     if (cls.needsReview)            { reviewCases.push(r); return; }
-    if (cls.isAddOn || hasInstall)  { toAssign.push(r); }
+    if (cls.isAddOn || cls.isKiosk || hasInstall)  { toAssign.push(r); }
   });
 
   // Existing workload
@@ -1057,7 +1084,7 @@ function runAssignments() {
   // fast), then VIP/A, so both get first call on capacity before the general
   // rotation fills everyone's queue.
   const assignments = [];
-  const prio = r => (r._cls && r._cls.isAddOn ? 2 : 0) + (isVipSegment(r[COL.SEGMENT]) ? 1 : 0);
+  const prio = r => (r._cls && (r._cls.isAddOn || r._cls.isKiosk) ? 2 : 0) + (isVipSegment(r[COL.SEGMENT]) ? 1 : 0);
   const ordered = [...toAssign].sort((a,b) => prio(b) - prio(a));
 
   ordered.forEach(r => {
@@ -1136,6 +1163,7 @@ function runAssignments() {
       "_vipUnmet":                vipUnmet,
       "_langUnmet":               langUnmet,
       "_addOn":                   isAddOn,
+      "_kiosk":                   !!cls.isKiosk,
       "_type":                    cls.type,
       "_typeReason":              cls.reason,
       "_productDerived":          !!r._productDerived,
@@ -1144,7 +1172,7 @@ function runAssignments() {
       "_neglected":               false,
       "_undocumented":            false,
       "_missingNote":             false,
-      "_awaitingImpl":            isAwaitingImplementation(r[COL.PARENT_STATUS], r[COL.INSTALL_DATE]),
+      "_awaitingImpl":            !cls.isKiosk && isAwaitingImplementation(r[COL.PARENT_STATUS], r[COL.INSTALL_DATE]),
       "_staleDays":               (() => { const t = lastTouchDate(r); return t ? businessDaysBetween(t, now) : null; })(),
       "_noUpdateLogged":          !String(r[COL.LATEST_COMMENT]||"").trim(),
       "_backlogged":              isBackloggedFn(String(r[COL.BACKLOG_SUB]||"")),
@@ -1190,7 +1218,7 @@ function runAssignments() {
     // Only cases that already have an owner in Salesforce are eligible for
     // Neglected and Undocumented; a case assigned by this run has only just
     // landed with someone, so there's nothing to chase yet.
-    const af          = activityFlags(r, staleCutoff, now, hasModifiedByCol, clsA.needsReview);
+    const af          = activityFlags(r, staleCutoff, now, hasModifiedByCol, clsA.needsReview, clsA.isKiosk);
     const backlogged  = af.blocked;
     const staleDays   = af.staleDays;
     const noUpdateLog = af.noNote;
@@ -1206,7 +1234,7 @@ function runAssignments() {
     const ownerA      = matchOwner(r[COL.OWNER], specNames);
     const langMismatch = !!ownerA && spanishAccounts.has(acctA) && !bilingualSet.has(ownerA);
 
-    if (!overdue && !nonWorkable && !cancelled && !clsA.isAddOn && !clsA.needsReview
+    if (!overdue && !nonWorkable && !cancelled && !clsA.isAddOn && !clsA.isKiosk && !clsA.needsReview
         && !attention && !preSplitA && !langMismatch) return;
     flaggedAssigned.push({
       "Assigned To":              String(r[COL.OWNER]||"").trim(),
@@ -1230,6 +1258,7 @@ function runAssignments() {
       "_overdue":                 overdue,
       "_vip":                     isVipSegment(r[COL.SEGMENT]),
       "_addOn":                   clsA.isAddOn,
+      "_kiosk":                   !!clsA.isKiosk,
       "_type":                    clsA.type,
       "_typeReason":              clsA.reason,
       "_productDerived":          !!r._productDerived,
@@ -1274,7 +1303,7 @@ function runAssignments() {
       const ps = String(r[COL.PARENT_STATUS]||"").trim();
       const hasInstall = inst && inst !== "nan" && inst !== "None";
       const clsU = r._cls || classifyCase(r, processingAccounts);
-      const afU  = activityFlags(r, staleCutoff, now, hasModifiedByCol, clsU.needsReview);
+      const afU  = activityFlags(r, staleCutoff, now, hasModifiedByCol, clsU.needsReview, clsU.isKiosk);
       unassigned.push({
         "Assigned To":           clsU.needsReview ? "— Needs Review —" : "— Unassigned —",
         "Case Number":           caseNum,
@@ -1297,6 +1326,7 @@ function runAssignments() {
         "_unassigned":           true,
         "_vip":                  isVipSegment(r[COL.SEGMENT]),
         "_addOn":                clsU.isAddOn,
+        "_kiosk":                !!clsU.isKiosk,
         "_type":                 clsU.type,
         "_typeReason":           clsU.reason,
         "_productDerived":       !!r._productDerived,
@@ -1318,7 +1348,7 @@ function runAssignments() {
         "_processing":           clsU.processing,
         "_needsReview":          clsU.needsReview,
         "_noInstallDate":        !hasInstall,
-        "_awaitingInstall":      !hasInstall && !clsU.needsReview && !clsU.isAddOn,
+        "_awaitingInstall":      !hasInstall && !clsU.needsReview && !clsU.isAddOn && !clsU.isKiosk,
         "_nonWorkable":          isNonWorkableFn(pb),
         "_cancelled":            isCancelledFn(ps),
       });
@@ -1338,6 +1368,7 @@ function runAssignments() {
   document.getElementById("s-spanish").textContent   = assignments.filter(a=>["spanish","español","es"].includes(a["Preferred Language"].toLowerCase())).length;
   document.getElementById("s-vip").textContent       = assignments.filter(a=>a._vip).length;
   document.getElementById("s-addon").textContent     = lastAssignments.filter(a=>a._addOn).length;
+  document.getElementById("s-kiosk").textContent     = lastAssignments.filter(a=>a._kiosk).length;
   document.getElementById("s-review").textContent    = lastAssignments.filter(a=>a._needsReview).length;
   document.getElementById("s-neglected").textContent = lastAssignments.filter(a => a._neglected).length;
   document.getElementById("s-undoc").textContent     = lastAssignments.filter(a => a._undocumented).length;
@@ -1365,6 +1396,7 @@ function renderAll() {
   const overdueCount = lastAssignments.filter(a=>a._overdue).length;
 
   scroll.innerHTML = `
+    ${renderKioskBanner()}
     ${renderAddOnBanner()}
     ${renderLanguageBanner()}
     ${renderSplitBanner()}
@@ -1408,6 +1440,7 @@ function renderAll() {
         <option value="addon"    ${fType==="addon"?"selected":""}>⚡ Add-ons (confirmed + likely)</option>
         <option value="Add-On"   ${fType==="Add-On"?"selected":""}>⚡ Add-On — confirmed (tile order)</option>
         <option value="Add-On?"  ${fType==="Add-On?"?"selected":""}>⚡ Add-On? — likely</option>
+        <option value="kiosk"    ${fType==="kiosk"?"selected":""}>🚀 Fast-track: Reddie / Kiosk / Opera</option>
         <option value="Review"   ${fType==="Review"?"selected":""}>⚠ Needs review</option>
         <option value="New Install" ${fType==="New Install"?"selected":""}>New Install (on the quote)</option>
         <option value="Standard" ${fType==="Standard"?"selected":""}>Standard</option>
@@ -1491,6 +1524,21 @@ function renderAll() {
 // ─────────────────────────────────────────────
 // ADD-ON PRIORITY BANNER
 // ─────────────────────────────────────────────
+function renderKioskBanner() {
+  const ks = lastAssignments.filter(r => r._kiosk);
+  if (!ks.length) return "";
+  const fresh = ks.filter(r => !r._alreadyAssigned && !r._unassigned);
+  const inSF  = ks.filter(r => r._alreadyAssigned);
+  const cnt = re => ks.filter(r => re.test(r["Integration / Product"])).length;
+  const reddie = cnt(/reddie/i), kiosk = cnt(/kiosk/i), opera = cnt(/\bopera\b/i);
+  return `<div class="overdue-banner" style="background:#f6f2ff;border-color:var(--purple)">
+    <h3 style="color:var(--purple)">🚀 ${ks.length} fast-track case${ks.length>1?"s":""} (Reddie / Kiosk / Opera) — flagged</h3>
+    <p style="color:var(--purple)">${reddie} Reddie, ${kiosk} SpotOn Kiosk, ${opera} Opera (by Product Name — the subject may say Reddie for both).
+      Assigned the moment they exist, with no install-date wait: ${fresh.length} newly assigned this run, ${inSF.length} already owned in Salesforce.
+      Flagged while these products are new.</p>
+  </div>`;
+}
+
 function renderAddOnBanner() {
   const addons = lastAssignments.filter(r => r._addOn);
   if (!addons.length) return "";
@@ -1838,6 +1886,7 @@ function autoReassignOoo() {
       "_vipUnmet":                isVip   && !vipSet.has(spec),
       "_langUnmet":               needBil && !bilingualSet.has(spec),
       "_addOn":                   clsR.isAddOn,
+      "_kiosk":                   !!clsR.isKiosk,
       "_needsAttention":          false,   // freshly reassigned
       "_staleDays":               (() => { const t = lastTouchDate(r); return t ? businessDaysBetween(t, new Date()) : null; })(),
       "_noUpdateLogged":          !String(r[COL.LATEST_COMMENT]||"").trim(),
@@ -1896,6 +1945,9 @@ function statFilter(type) {
       break;
     case "addon":
       fType = "addon";
+      break;
+    case "kiosk":
+      fType = "kiosk";
       break;
     case "review":
       fType = "Review";
@@ -1961,7 +2013,7 @@ function syncDropdowns() {
 }
 
 function updateStatCardHighlights() {
-  const map = { new:"sc-new", addon:"sc-addon", review:"sc-review", spanish:"sc-spanish", vip:"sc-vip",
+  const map = { new:"sc-new", addon:"sc-addon", kiosk:"sc-kiosk", review:"sc-review", spanish:"sc-spanish", vip:"sc-vip",
                 neglected:"sc-neglected", undocumented:"sc-undoc", missingnote:"sc-missnote", overdue:"sc-overdue",
                 nonworkable:"sc-nw", cancelled:"sc-cancelled", ooo:"sc-ooo", unassigned:"sc-unassigned" };
   Object.values(map).forEach(id => { const el = document.getElementById(id); if (el) el.classList.remove("active"); });
@@ -1985,8 +2037,9 @@ function applyFilters() {
 
   filteredRows = lastAssignments.filter(r => {
     if (fType === "addon"      && !r._addOn)      return false;
+    if (fType === "kiosk"      && !r._kiosk)      return false;
     if (fType === "processing" && !r._processing)  return false;
-    if (fType !== "all" && fType !== "addon" && fType !== "processing" && r["Case Type"] !== fType) return false;
+    if (fType !== "all" && fType !== "addon" && fType !== "kiosk" && fType !== "processing" && r["Case Type"] !== fType) return false;
     if (fOwner !== "all"   && r["Assigned To"] !== fOwner) return false;
     if (fProduct !== "all" && r["Integration / Product"] !== fProduct) return false;
     if (fSegment === "vip" && !r._vip) return false;
@@ -2041,7 +2094,7 @@ function sortBy(thEl) {
 // Until the user picks a column, order the table by urgency:
 // add-ons → review cases → overdue → everything else.
 function defaultSort() {
-  const rank = r => r._addOn ? 0 : r._neglected ? 1 : r._undocumented ? 2 : r._missingNote ? 3
+  const rank = r => (r._addOn || r._kiosk) ? 0 : r._neglected ? 1 : r._undocumented ? 2 : r._missingNote ? 3
     : r._needsReview ? 4 : r._overdue ? 5 : r._unassigned ? 7 : 6;
   filteredRows.sort((a,b) => {
     const d = rank(a) - rank(b);
@@ -2109,7 +2162,7 @@ function rowHtml(r) {
 
   // Case type + the "already processing" marker
   const ty       = r["Case Type"] || "";
-  const tyLabel  = ty === "Add-On" ? "⚡ Add-On" : ty === "Add-On?" ? "⚡ Add-On?" : ty === "Review" ? "⚠ Review" : ty;
+  const tyLabel  = ty === "Add-On" ? "⚡ Add-On" : ty === "Add-On?" ? "⚡ Add-On?" : ty === "Review" ? "⚠ Review" : ty === "Fast-Track" ? "🚀 Fast-Track" : ty;
   const typeCell = ty
     ? `<span class="pill ${typePillClass(ty)}" title="${(r._typeReason||"").replace(/"/g,'&quot;')}">${tyLabel}</span>`
     : `<span style="color:var(--gray-200);font-size:11px">—</span>`;
@@ -2154,7 +2207,7 @@ function rowHtml(r) {
     : r._alreadyAssigned
       ? `<span class="pill pill-gray">${r["Assigned To"]}</span>`
       : `<span class="pill pill-blue">${r["Assigned To"]}</span>`;
-  const rowClass = r._addOn ? "addon-row"
+  const rowClass = r._kiosk ? "kiosk-row" : r._addOn ? "addon-row"
     : r._neglected ? "attention-row"
     : r._undocumented ? "undoc-row"
     : r._needsReview ? "review-row"
@@ -2298,6 +2351,7 @@ function exportCSV(filteredOnly) {
     if (r._missingNote)  f.push("MISSING NOTE — none written and one is due (" + (r._noteDueReason||"") + ")");
     if (r._awaitingImpl) f.push("Awaiting implementation — parent is in " + (r["Parent Status"]||"an active stage") + " with no install date");
     if (r._addOn)     f.push("ADD-ON — priority");
+    if (r._kiosk)     f.push("FAST-TRACK (Reddie / Kiosk / Opera) — flagged, assigned on creation");
     if (r._needsReview) f.push("NEEDS REVIEW — " + (r._typeReason||"no activation subject"));
     if (r._continuityBroken) f.push("Account split — a hard rule moved this off the account's existing specialist");
     if (r._offTeamSplit)     f.push("Account's existing owner is off-team (" + r._offTeamOwner + ")");
